@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.api import auth, resources, meetings
 
 app = FastAPI(
     title="Meetings Scheduling API",
@@ -7,14 +8,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Налаштування CORS (щоб фронтенд міг робити запити до бекенду)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # У продакшені тут буде URL вашого фронтенду
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth.router)
+app.include_router(resources.router)
+app.include_router(meetings.router)
 
 @app.get("/")
 def root():

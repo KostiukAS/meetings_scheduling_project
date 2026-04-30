@@ -1,5 +1,5 @@
 from sqlalchemy import String, ForeignKey, Integer
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.database import Base
 
 class MeetingResource(Base):
@@ -9,6 +9,8 @@ class MeetingResource(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), primary_key=True)
     
     weight: Mapped[int] = mapped_column(Integer)
+
+    meeting: Mapped["Meeting"] = relationship(back_populates="resources")
 
 class Resource(Base):
     __tablename__ = "resources"

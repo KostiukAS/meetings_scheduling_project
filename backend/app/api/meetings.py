@@ -1,0 +1,46 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+
+from app.db.database import get_db
+from app.api.dependencies import get_current_user
+from app.models.user import User
+from app.schemas.meeting import FindSlotsRequest, SlotResponse
+from app.services import meet_service
+
+router = APIRouter(
+    prefix="/meetings",
+    tags=["Meetings"]
+)
+
+@router.post("/find-slots", response_model=List[SlotResponse])
+def find_slots(
+    request: FindSlotsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Приймає параметри нової зустрічі, запускає алгоритм ковзного вікна 
+    і повертає ТОП-5 найкращих часових слотів.
+    """
+    if request.duration_minutes % 15 != 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="Тривалість зустрічі має бути кратною 15 хвилинам."
+        )
+        
+    if request.search_start >= request.search_end:
+        raise HTTPException(
+            status_code=400, 
+            detail="Час початку пошуку має бути раніше за час кінця."
+        )
+
+    slots = meet_service.find_available_slots(db, request)
+    
+    if not slots:
+        raise HTTPException(
+            status_code=404, 
+            detail="Не знайдено жодного вільного слоту у вказаному діапазоні."
+        )
+        
+    return slots
