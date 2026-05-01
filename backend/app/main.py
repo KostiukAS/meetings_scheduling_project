@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, resources, meetings
+from app.models import user, project, meeting, resource
 
 app = FastAPI(
     title="Meetings Scheduling API",

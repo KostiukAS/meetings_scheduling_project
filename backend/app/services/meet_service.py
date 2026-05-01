@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-from app.schemas.meeting import FindSlotsRequest, SlotResponse
+from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.resource import MeetingResource
 from app.algorithm.scheduler import find_best_meeting_slots
@@ -97,3 +97,43 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
         ))
         
     return result
+
+def create_meeting(db: Session, meeting_data: MeetingCreate, current_user_id: int):
+    """
+    Зберігає нову зустріч у базу даних разом із її учасниками та ресурсами.
+    """
+    # 1. Створюємо основний запис зустрічі
+    new_meeting = Meeting(
+        title=meeting_data.title,
+        start_time=meeting_data.start_time,
+        end_time=meeting_data.end_time,
+        project_id=meeting_data.project_id,
+        organizer_id=current_user_id
+    )
+    db.add(new_meeting)
+    db.commit()
+    db.refresh(new_meeting)
+
+    # 2. Додаємо учасників у зв'язну таблицю
+    for p in meeting_data.participants:
+        mp = MeetingParticipant(
+            meeting_id=new_meeting.id, 
+            user_id=p.id, 
+            weight=p.weight, 
+            status="Waiting for response"
+        )
+        db.add(mp)
+
+    # 3. Додаємо ресурси у зв'язну таблицю
+    for r in meeting_data.resources:
+        mr = MeetingResource(
+            meeting_id=new_meeting.id, 
+            resource_id=r.id, 
+            weight=r.weight
+        )
+        db.add(mr)
+
+    db.commit()
+    db.refresh(new_meeting)
+    
+    return new_meeting

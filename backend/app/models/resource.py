@@ -1,6 +1,10 @@
+from typing import TYPE_CHECKING
 from sqlalchemy import String, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.database import Base
+
+if TYPE_CHECKING:
+    from app.models.meeting import Meeting
 
 class MeetingResource(Base):
     __tablename__ = "meeting_resources"
@@ -10,7 +14,7 @@ class MeetingResource(Base):
     
     weight: Mapped[int] = mapped_column(Integer)
 
-    meeting: Mapped["Meeting"] = relationship(back_populates="resources")
+    meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="resources")
 
 class Resource(Base):
     __tablename__ = "resources"

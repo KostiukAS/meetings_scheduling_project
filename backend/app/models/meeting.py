@@ -1,8 +1,11 @@
-from typing import List
+from typing import TYPE_CHECKING, List
 from datetime import datetime
 from sqlalchemy import String, ForeignKey, DateTime, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.database import Base
+
+if TYPE_CHECKING:
+    from app.models.resource import MeetingResource
 
 class MeetingParticipant(Base):
     __tablename__ = "meeting_participants"
@@ -13,7 +16,7 @@ class MeetingParticipant(Base):
     weight: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(50), default="Pending")
 
-    meeting: Mapped["Meeting"] = relationship(back_populates="participants")
+    meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="participants")
 
 class Meeting(Base):
     __tablename__ = "meetings"
@@ -27,5 +30,5 @@ class Meeting(Base):
     start_time: Mapped[datetime] = mapped_column(DateTime)
     end_time: Mapped[datetime] = mapped_column(DateTime)
 
-    participants: Mapped[List["MeetingParticipant"]] = relationship(back_populates="meeting")
-    resources: Mapped[List["MeetingResource"]] = relationship(back_populates="meeting")
+    participants: Mapped[List["MeetingParticipant"]] = relationship("MeetingParticipant", back_populates="meeting")
+    resources: Mapped[List["MeetingResource"]] = relationship("MeetingResource", back_populates="meeting")
