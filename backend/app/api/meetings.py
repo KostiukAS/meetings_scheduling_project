@@ -5,7 +5,7 @@ from typing import List
 from app.db.database import get_db
 from app.api.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.meeting import FindSlotsRequest, SlotResponse
+from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse
 from app.services import meet_service
 
 router = APIRouter(
@@ -44,3 +44,21 @@ def find_slots(
         )
         
     return slots
+
+@router.post("/", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+def create_new_meeting(
+    meeting_in: MeetingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Створює нову зустріч.
+    """
+    # Перевірка базової логіки: час кінця має бути після часу початку
+    if meeting_in.start_time >= meeting_in.end_time:
+        raise HTTPException(
+            status_code=400, 
+            detail="Час початку зустрічі має бути раніше за час кінця."
+        )
+        
+    return meet_service.create_meeting(db, meeting_data=meeting_in, current_user_id=current_user.id)
