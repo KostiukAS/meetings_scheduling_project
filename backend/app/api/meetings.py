@@ -62,3 +62,13 @@ def create_new_meeting(
         )
         
     return meet_service.create_meeting(db, meeting_data=meeting_in, current_user_id=current_user.id)
+
+@router.get("/", response_model=List[MeetingResponse])
+def get_my_meetings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Отримує список усіх зустрічей поточного авторизованого користувача.
+    """
+    return meet_service.get_user_meetings(db, user_id=current_user.id)

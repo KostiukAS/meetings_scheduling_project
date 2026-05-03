@@ -137,3 +137,9 @@ def create_meeting(db: Session, meeting_data: MeetingCreate, current_user_id: in
     db.refresh(new_meeting)
     
     return new_meeting
+
+def get_user_meetings(db: Session, user_id: int):
+    """Отримує всі зустрічі, в яких бере участь користувач."""
+    return db.query(Meeting).join(MeetingParticipant).filter(
+        MeetingParticipant.user_id == user_id
+    ).all()
