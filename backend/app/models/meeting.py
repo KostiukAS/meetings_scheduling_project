@@ -30,5 +30,13 @@ class Meeting(Base):
     start_time: Mapped[datetime] = mapped_column(DateTime)
     end_time: Mapped[datetime] = mapped_column(DateTime)
 
-    participants: Mapped[List["MeetingParticipant"]] = relationship("MeetingParticipant", back_populates="meeting")
-    resources: Mapped[List["MeetingResource"]] = relationship("MeetingResource", back_populates="meeting")
+    participants: Mapped[List["MeetingParticipant"]] = relationship(
+        "MeetingParticipant", 
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    resources: Mapped[List["MeetingResource"]] = relationship(
+        "MeetingResource", 
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )

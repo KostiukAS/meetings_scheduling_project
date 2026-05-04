@@ -50,3 +50,8 @@ def delete_schedule(
 ):
     """Видалити запис із графіка."""
     schedule_service.delete_schedule(db, schedule_id=schedule_id)
+    
+@router.get("/me", response_model=UserResponse)
+def read_users_me(current_user: User = Depends(get_current_user)):
+    """Отримати дані поточного авторизованого користувача."""
+    return current_user

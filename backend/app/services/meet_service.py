@@ -9,20 +9,21 @@ from app.algorithm.scheduler import find_best_meeting_slots
 QUANT_MINUTES = 15
 
 def dt_to_quant(dt: datetime, base_dt: datetime) -> int:
-    """Перетворює реальний час у номер кванта відносно base_dt."""
     delta = dt - base_dt
     return int(delta.total_seconds() // (QUANT_MINUTES * 60))
 
 def quant_to_dt(q: int, base_dt: datetime) -> datetime:
-    """Перетворює номер кванта назад у реальний час."""
     return base_dt + timedelta(minutes=q * QUANT_MINUTES)
 
 def find_available_slots(db: Session, request: FindSlotsRequest):
-    base_dt = request.search_start 
+    search_start = request.search_start.replace(tzinfo=None)
+    search_end = request.search_end.replace(tzinfo=None)
+    
+    base_dt = search_start 
     
     d_quant = request.duration_minutes // QUANT_MINUTES
     t_start = 0
-    t_end = dt_to_quant(request.search_end, base_dt)
+    t_end = dt_to_quant(search_end, base_dt)
     
     r_m = []
     busy = []
@@ -43,8 +44,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                 sched_map[s.user_id] = {}
             sched_map[s.user_id][s.day_of_week] = s
 
-        current_date = request.search_start.date()
-        end_date = request.search_end.date()
+        current_date = search_start.date()
+        end_date = search_end.date()
         
         while current_date <= end_date:
             day_of_week = current_date.weekday()
