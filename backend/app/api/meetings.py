@@ -5,7 +5,8 @@ from typing import List
 from app.db.database import get_db
 from app.api.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse
+from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse, ParticipantStatusUpdate, AddParticipantRequest, MeetingUpdate
+from app.models.meeting import Meeting, MeetingParticipant
 from app.services import meet_service
 
 router = APIRouter(
@@ -72,3 +73,135 @@ def get_my_meetings(
     Отримує список усіх зустрічей поточного авторизованого користувача.
     """
     return meet_service.get_user_meetings(db, user_id=current_user.id)
+
+@router.post("/{meeting_id}/participants", status_code=status.HTTP_201_CREATED)
+def add_participant_to_meeting(
+    meeting_id: int,
+    participant: AddParticipantRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Додати нового учасника до існуючої зустрічі"""
+    
+    # 1. Перевіряємо чи існує зустріч
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+        
+    # 2. Додаємо запис у таблицю зв'язку
+    new_participant = MeetingParticipant(
+        meeting_id=meeting_id,
+        user_id=participant.user_id,
+        weight=participant.weight,
+        status="Pending"
+    )
+    db.add(new_participant)
+    db.commit()
+    return {"message": "Учасника успішно додано"}
+
+@router.patch("/{meeting_id}/participants/{user_id}/status")
+def update_participant_status(
+    meeting_id: int,
+    user_id: int,
+    status_update: ParticipantStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Оновити статус учасника."""
+    
+    # Перевірка: тільки сам користувач може змінити свій статус RSVP
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Ви можете змінити лише свій статус")
+
+    participant = db.query(MeetingParticipant).filter(
+        MeetingParticipant.meeting_id == meeting_id,
+        MeetingParticipant.user_id == user_id
+    ).first()
+    
+    if not participant:
+        raise HTTPException(status_code=404, detail="Учасника не знайдено на цій зустрічі")
+        
+    participant.status = status_update.status
+    db.commit()
+    return {"message": f"Статус успішно змінено на {status_update.status}"}
+
+@router.patch("/{meeting_id}", response_model=MeetingResponse)
+def update_meeting(
+    meeting_id: int,
+    meeting_update: MeetingUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Оновлення зустрічі."""
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+
+    is_organizer = meeting.organizer_id == current_user.id
+    is_participant = db.query(MeetingParticipant).filter(
+        MeetingParticipant.meeting_id == meeting_id,
+        MeetingParticipant.user_id == current_user.id
+    ).first() is not None
+
+    if not is_organizer and not is_participant:
+        raise HTTPException(status_code=403, detail="Ви не маєте доступу до цієї зустрічі")
+
+    if not is_organizer:
+        if meeting_update.start_time or meeting_update.end_time or meeting_update.frequency:
+            raise HTTPException(
+                status_code=403, 
+                detail="Тільки організатор може змінювати час або частоту зустрічі"
+            )
+
+    update_data = meeting_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(meeting, key, value)
+        
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_meeting(
+    meeting_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Видалення зустрічі."""
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+        
+    if meeting.organizer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Тільки організатор може видалити зустріч")
+
+    db.delete(meeting)
+    db.commit()
+    return {"detail": "Зустріч успішно видалена"}
+
+@router.delete("/{meeting_id}/participants/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_participant_from_meeting(
+    meeting_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Видалення учасника із зустрічі."""
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+
+    if meeting.organizer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Тільки організатор може видаляти учасників")
+
+    participant = db.query(MeetingParticipant).filter(
+        MeetingParticipant.meeting_id == meeting_id,
+        MeetingParticipant.user_id == user_id
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Учасника не знайдено на цій зустрічі")
+
+    db.delete(participant)
+    db.commit()
+    return {"detail": "Учасника успішно видалено"}

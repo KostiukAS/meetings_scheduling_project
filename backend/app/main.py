@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, resources, meetings
+from app.api import auth, resources, meetings, projects, users, roles
 from app.models import user, project, meeting, resource
 
 app = FastAPI(
@@ -20,6 +20,9 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(resources.router)
 app.include_router(meetings.router)
+app.include_router(projects.router)
+app.include_router(users.router)
+app.include_router(roles.router)
 
 @app.get("/")
 def root():

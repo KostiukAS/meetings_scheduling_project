@@ -41,3 +41,16 @@ class MeetingResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+    
+class ParticipantStatusUpdate(BaseModel):
+    status: str # "Accepted", "Rejected", або "Pending"
+
+class AddParticipantRequest(BaseModel):
+    user_id: int
+    weight: int
+
+class MeetingUpdate(BaseModel):
+    title: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    frequency: Optional[str] = None

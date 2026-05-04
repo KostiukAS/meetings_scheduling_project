@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.resource import MeetingResource
+from app.models.user import Schedule
 from app.algorithm.scheduler import find_best_meeting_slots
 
 QUANT_MINUTES = 15
@@ -17,9 +18,8 @@ def quant_to_dt(q: int, base_dt: datetime) -> datetime:
     return base_dt + timedelta(minutes=q * QUANT_MINUTES)
 
 def find_available_slots(db: Session, request: FindSlotsRequest):
-    base_dt = request.search_start # Точка відліку (квант 0)
+    base_dt = request.search_start 
     
-    # 1. Підготовка вхідних даних для алгоритму
     d_quant = request.duration_minutes // QUANT_MINUTES
     t_start = 0
     t_end = dt_to_quant(request.search_end, base_dt)
@@ -35,7 +35,50 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
     user_ids = [u.id for u in request.users]
     resource_ids = [r.id for r in request.resources]
 
-    # 2. Витягуємо з БД існуючі зайнятості КОРИСТУВАЧІВ у цьому діапазоні
+    if user_ids:
+        schedules = db.query(Schedule).filter(Schedule.user_id.in_(user_ids)).all()
+        sched_map = {}
+        for s in schedules:
+            if s.user_id not in sched_map:
+                sched_map[s.user_id] = {}
+            sched_map[s.user_id][s.day_of_week] = s
+
+        current_date = request.search_start.date()
+        end_date = request.search_end.date()
+        
+        while current_date <= end_date:
+            day_of_week = current_date.weekday()
+            day_start = datetime.combine(current_date, datetime.min.time())
+            day_end = datetime.combine(current_date, datetime.max.time())
+            
+            for u_id in user_ids:
+                s = sched_map.get(u_id, {}).get(day_of_week)
+                
+                if not s or s.is_day_off:
+                    busy.append({
+                        "resource_id": f"u_{u_id}",
+                        "start_quantum": max(0, dt_to_quant(day_start, base_dt)),
+                        "end_quantum": dt_to_quant(day_end, base_dt)
+                    })
+                else:
+                    work_start = datetime.combine(current_date, s.start_time)
+                    if work_start > day_start:
+                        busy.append({
+                            "resource_id": f"u_{u_id}",
+                            "start_quantum": max(0, dt_to_quant(day_start, base_dt)),
+                            "end_quantum": dt_to_quant(work_start, base_dt)
+                        })
+                        
+                    work_end = datetime.combine(current_date, s.end_time)
+                    if work_end < day_end:
+                        busy.append({
+                            "resource_id": f"u_{u_id}",
+                            "start_quantum": max(0, dt_to_quant(work_end, base_dt)),
+                            "end_quantum": dt_to_quant(day_end, base_dt)
+                        })
+            
+            current_date += timedelta(days=1)
+
     if user_ids:
         user_meetings = db.query(Meeting).join(MeetingParticipant).filter(
             MeetingParticipant.user_id.in_(user_ids),
@@ -43,19 +86,17 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
             Meeting.start_time < request.search_end
         ).all()
         
-        # Заповнюємо масив busy для алгоритму (користувачі)
         for m in user_meetings:
             start_q = dt_to_quant(m.start_time, base_dt)
             end_q = dt_to_quant(m.end_time, base_dt)
             for mp in m.participants: 
-                if mp.user_id in user_ids:
+                if mp.user_id in user_ids and mp.status != "Rejected":
                     busy.append({
                         "resource_id": f"u_{mp.user_id}",
                         "start_quantum": max(0, start_q),
                         "end_quantum": end_q
                     })
 
-    # 3. Витягуємо з БД зайнятості РЕСУРСІВ (кімнат/обладнання)
     if resource_ids:
         res_meetings = db.query(Meeting).join(MeetingResource).filter(
             MeetingResource.resource_id.in_(resource_ids),
@@ -63,7 +104,6 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
             Meeting.start_time < request.search_end
         ).all()
         
-        # Заповнюємо масив busy для алгоритму (ресурси)
         for m in res_meetings:
             start_q = dt_to_quant(m.start_time, base_dt)
             end_q = dt_to_quant(m.end_time, base_dt)
@@ -75,7 +115,6 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                         "end_quantum": end_q
                     })
         
-    # 4. Запуск алгоритму планування
     best_quanta_slots = find_best_meeting_slots(
         d=d_quant,
         t_start=t_start,
@@ -84,7 +123,6 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
         busy=busy
     )
     
-    # 5. Конвертуємо кванти назад у дати
     result = []
     for slot in best_quanta_slots:
         start_dt = quant_to_dt(slot["start_time"], base_dt)
