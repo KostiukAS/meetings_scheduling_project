@@ -30,21 +30,47 @@ const Dashboard = () => {
   };
 
   const fetchMeetings = async (userId) => {
-    try {
+      try {
       const response = await api.get('/meetings/');
-      const formattedEvents = response.data.map(meeting => {
+      const formattedEvents = [];
+
+      response.data.forEach(meeting => {
         const startUTC = meeting.start_time.endsWith('Z') ? meeting.start_time : `${meeting.start_time}Z`;
         const endUTC = meeting.end_time.endsWith('Z') ? meeting.end_time : `${meeting.end_time}Z`;
-
-        return {
+        
+        const baseEvent = {
           id: meeting.id,
           title: meeting.title,
-          start: startUTC,
-          end: endUTC,
-          backgroundColor: meeting.organizer_id === userId ? '#28a745' : '#3788d8', // ЗМІНЕНО: Використовуємо динамічний ID
-          extendedProps: { organizer_id: meeting.organizer_id }
+          backgroundColor: meeting.organizer_id === userId ? '#28a745' : '#3788d8',
+          extendedProps: { organizer_id: meeting.organizer_id, frequency: meeting.frequency }
         };
+
+        if (meeting.frequency === 'once' || !meeting.frequency) {
+          formattedEvents.push({
+            ...baseEvent,
+            start: startUTC,
+            end: endUTC
+          });
+        } else if (meeting.frequency === 'daily') {
+          formattedEvents.push({
+            ...baseEvent,
+            startTime: new Date(startUTC).toLocaleTimeString('en-GB', { hour12: false }),
+            endTime: new Date(endUTC).toLocaleTimeString('en-GB', { hour12: false }),
+            startRecur: startUTC, // Починати відображати з дати створення
+            daysOfWeek: [0, 1, 2, 3, 4, 5, 6] // Всі дні
+          });
+        } else if (meeting.frequency === 'weekly') {
+          const dayNum = new Date(startUTC).getDay(); // Отримуємо день тижня (0-6)
+          formattedEvents.push({
+            ...baseEvent,
+            startTime: new Date(startUTC).toLocaleTimeString('en-GB', { hour12: false }),
+            endTime: new Date(endUTC).toLocaleTimeString('en-GB', { hour12: false }),
+            startRecur: startUTC,
+            daysOfWeek: [dayNum]
+          });
+        }
       });
+
       setEvents(formattedEvents);
     } catch (error) {
       if (error.response?.status === 401) handleLogout();
@@ -76,7 +102,8 @@ const Dashboard = () => {
       title: clickInfo.event.title,
       start: clickInfo.event.startStr,
       end: clickInfo.event.endStr,
-      organizer_id: clickInfo.event.extendedProps.organizer_id
+      organizer_id: clickInfo.event.extendedProps.organizer_id,
+      frequency: clickInfo.event.extendedProps.frequency
     });
     setIsDetailsModalOpen(true);
   };

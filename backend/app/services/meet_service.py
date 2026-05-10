@@ -15,6 +15,31 @@ def dt_to_quant(dt: datetime, base_dt: datetime) -> int:
 def quant_to_dt(q: int, base_dt: datetime) -> datetime:
     return base_dt + timedelta(minutes=q * QUANT_MINUTES)
 
+def project_recurring_busy(busy_list, meeting, search_start, search_end, base_dt, resource_prefix, res_id):
+    meeting_duration = meeting.end_time - meeting.start_time
+    current_occurrence_start = meeting.start_time
+    
+    step = None
+    if meeting.frequency == "daily":
+        step = timedelta(days=1)
+    elif meeting.frequency == "weekly":
+        step = timedelta(weeks=1)
+    
+    if not step:
+        return
+
+    while current_occurrence_start < search_end:
+        current_occurrence_end = current_occurrence_start + meeting_duration
+        
+        if current_occurrence_end > search_start:
+            busy_list.append({
+                "resource_id": f"{resource_prefix}_{res_id}",
+                "start_quantum": max(0, dt_to_quant(current_occurrence_start, base_dt)),
+                "end_quantum": dt_to_quant(current_occurrence_end, base_dt)
+            })
+        
+        current_occurrence_start += step
+
 def find_available_slots(db: Session, request: FindSlotsRequest):
     search_start = request.search_start.replace(tzinfo=None)
     search_end = request.search_end.replace(tzinfo=None)
@@ -83,42 +108,44 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
     if user_ids:
         user_meetings = db.query(Meeting).join(MeetingParticipant).filter(
             MeetingParticipant.user_id.in_(user_ids),
-            Meeting.end_time > request.search_start,
-            Meeting.start_time < request.search_end
+            Meeting.start_time < search_end
         ).all()
         
         for m in user_meetings:
-            start_q = dt_to_quant(m.start_time, base_dt)
-            end_q = dt_to_quant(m.end_time, base_dt)
-            for mp in m.participants: 
+            for mp in m.participants:
                 if mp.user_id in user_ids and mp.status != "Rejected":
-                    busy.append({
-                        "resource_id": f"u_{mp.user_id}",
-                        "start_quantum": max(0, start_q),
-                        "end_quantum": end_q
-                    })
+                    if m.frequency == "once" or not m.frequency:
+                        if m.end_time > search_start:
+                            busy.append({
+                                "resource_id": f"u_{mp.user_id}",
+                                "start_quantum": max(0, dt_to_quant(m.start_time, base_dt)),
+                                "end_quantum": dt_to_quant(m.end_time, base_dt)
+                            })
+                    else:
+                        project_recurring_busy(busy, m, search_start, search_end, base_dt, "u", mp.user_id)
 
     if resource_ids:
         res_meetings = db.query(Meeting).join(MeetingResource).filter(
-            MeetingResource.resource_id.in_(resource_ids),
-            Meeting.end_time > request.search_start,
-            Meeting.start_time < request.search_end
+            MeetingResource.resource_id.in_(resource_ids), 
+            Meeting.start_time < search_end
         ).all()
         
         for m in res_meetings:
-            start_q = dt_to_quant(m.start_time, base_dt)
-            end_q = dt_to_quant(m.end_time, base_dt)
             for mr in m.resources: 
                 if mr.resource_id in resource_ids:
-                    busy.append({
-                        "resource_id": f"r_{mr.resource_id}",
-                        "start_quantum": max(0, start_q),
-                        "end_quantum": end_q
-                    })
+                    if m.frequency == "once" or not m.frequency:
+                        if m.end_time > search_start:
+                            busy.append({
+                                "resource_id": f"r_{mr.resource_id}",
+                                "start_quantum": max(0, dt_to_quant(m.start_time, base_dt)),
+                                "end_quantum": dt_to_quant(m.end_time, base_dt)
+                            })
+                    else:
+                        project_recurring_busy(busy, m, search_start, search_end, base_dt, "r", mr.resource_id)
         
     best_quanta_slots = find_best_meeting_slots(
         d=d_quant,
-        t_start=t_start,
+        t_start=0,
         t_end=t_end,
         r_m=r_m,
         busy=busy

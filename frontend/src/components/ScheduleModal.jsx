@@ -11,6 +11,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   const [availableUsers, setAvailableUsers] = useState([]);
   const [availableResources, setAvailableResources] = useState([]);
   const [availableProjects, setAvailableProjects] = useState([]); // ДОДАНО
+  const [frequency, setFrequency] = useState('once');
 
   const [participants, setParticipants] = useState({});
   const [resources, setResources] = useState({});
@@ -123,6 +124,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
         title: title || 'Нова зустріч',
         start_time: slot.start_time,
         end_time: slot.end_time,
+        frequency: frequency,
         project_id: selectedProject, // ЗМІНЕНО: Використовуємо вибраний проєкт
         participants: users,
         resources: resPayload
@@ -221,6 +223,15 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
               <option value={30}>30 хв</option>
               <option value={60}>1 година</option>
               <option value={120}>2 години</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Частота зустрічі: </label>
+            <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={inputStyle}>
+              <option value="once">Одноразова</option>
+              <option value="daily">Щодня</option>
+              <option value="weekly">Раз на тиждень</option>
             </select>
           </div>
 
