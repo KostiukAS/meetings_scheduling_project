@@ -5,7 +5,9 @@ from typing import List
 from app.db.database import get_db
 from app.api.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse, ParticipantStatusUpdate, AddParticipantRequest, MeetingUpdate
+from app.schemas.meeting import (FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse, 
+                                 ParticipantStatusUpdate, AddParticipantRequest, MeetingUpdate, 
+                                 ValidateSlotRequest, ValidateSlotResponse)
 from app.models.meeting import Meeting, MeetingParticipant
 from app.services import meet_service
 
@@ -73,6 +75,16 @@ def get_my_meetings(
     Отримує список усіх зустрічей поточного авторизованого користувача.
     """
     return meet_service.get_user_meetings(db, user_id=current_user.id)
+
+@router.post("/validate-slot", response_model=ValidateSlotResponse)
+def validate_slot_endpoint(
+    request: ValidateSlotRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Валідація конкретного вікна на наявність конфліктів."""
+    from app.services.meet_service import validate_meeting_slot
+    return validate_meeting_slot(db, request)
 
 @router.post("/{meeting_id}/participants", status_code=status.HTTP_201_CREATED)
 def add_participant_to_meeting(

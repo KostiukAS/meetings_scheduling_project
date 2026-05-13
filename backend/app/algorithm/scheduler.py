@@ -19,7 +19,7 @@ def build_availability_matrix(r_m: List[Dict[str, Any]], busy: List[Dict[str, in
             # Визначаємо межі перетину існуючої зустрічі з нашим діапазоном пошуку
             s = max(t_start, event["start_quantum"])
             e = min(t_end, event["end_quantum"])
-            for t in range(s, e + 1):
+            for t in range(s, e):
                 b_matrix[r_id][t] = 1
                 
     return b_matrix

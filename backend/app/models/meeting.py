@@ -1,6 +1,6 @@
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 from datetime import datetime
-from sqlalchemy import String, ForeignKey, DateTime, Integer
+from sqlalchemy import String, ForeignKey, DateTime, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.database import Base
 
@@ -26,6 +26,7 @@ class Meeting(Base):
     organizer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     
     title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     frequency: Mapped[str] = mapped_column(String(50), nullable=True)
     start_time: Mapped[datetime] = mapped_column(DateTime)
     end_time: Mapped[datetime] = mapped_column(DateTime)

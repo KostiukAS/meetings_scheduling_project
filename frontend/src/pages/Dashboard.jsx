@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ukLocale from '@fullcalendar/core/locales/uk';
 import { useNavigate } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -57,7 +58,7 @@ const Dashboard = () => {
             startTime: new Date(startUTC).toLocaleTimeString('en-GB', { hour12: false }),
             endTime: new Date(endUTC).toLocaleTimeString('en-GB', { hour12: false }),
             startRecur: startUTC, // Починати відображати з дати створення
-            daysOfWeek: [0, 1, 2, 3, 4, 5, 6] // Всі дні
+            daysOfWeek: [1, 2, 3, 4, 5]
           });
         } else if (meeting.frequency === 'weekly') {
           const dayNum = new Date(startUTC).getDay(); // Отримуємо день тижня (0-6)
@@ -137,6 +138,8 @@ const Dashboard = () => {
           height="auto"
           eventClick={handleEventClick}
           eventCursor="pointer"
+          locale={ukLocale}
+          firstDay={1}
         />
       </div>
 

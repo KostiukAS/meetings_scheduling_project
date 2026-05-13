@@ -7,6 +7,16 @@ class ParticipantItem(BaseModel):
     id: int
     weight: int
 
+class ParticipantDetail(BaseModel):
+    id: int
+    full_name: Optional[str] = None
+    email: str
+    status: str
+
+class ResourceDetail(BaseModel):
+    id: int
+    name: str
+
 # Запит на пошук часу
 class FindSlotsRequest(BaseModel):
     duration_minutes: int  # Тривалість у хвилинах (наприклад, 60)
@@ -21,22 +31,31 @@ class SlotResponse(BaseModel):
     end_time: datetime
     score: int
 
-# Схема для створення нової зустрічі
-class MeetingCreate(BaseModel):
+class MeetingBase(BaseModel):
     title: str
+    description: Optional[str] = None
     start_time: datetime
     end_time: datetime
+    frequency: Optional[str] = None
+
+# Схема для створення нової зустрічі
+class MeetingCreate(MeetingBase):
     project_id: Optional[int] = None
-    participants: List[ParticipantItem] = []  # Використовуємо вже існуючу схему ParticipantItem
+    participants: List[ParticipantItem] = []
     resources: List[ParticipantItem] = []
 
 # Схема для повернення створеної зустрічі
 class MeetingResponse(BaseModel):
     id: int
     title: str
+    description: Optional[str] = None
     organizer_id: int
     start_time: datetime
     end_time: datetime
+    frequency: Optional[str] = None
+    project_id: Optional[int] = None
+    participants: List[ParticipantDetail] = []
+    resources: List[ResourceDetail] = []
 
     model_config = {
         "from_attributes": True
@@ -51,6 +70,18 @@ class AddParticipantRequest(BaseModel):
 
 class MeetingUpdate(BaseModel):
     title: Optional[str] = None
+    description: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     frequency: Optional[str] = None
+
+class ValidateSlotRequest(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    users: List[ParticipantItem] = []
+    resources: List[ParticipantItem] = []
+
+class ValidateSlotResponse(BaseModel):
+    is_valid: bool
+    score: int
+    conflicts: List[str]

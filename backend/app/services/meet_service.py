@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate
+from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, ValidateSlotRequest, ValidateSlotResponse
 from app.models.meeting import Meeting, MeetingParticipant
-from app.models.resource import MeetingResource
-from app.models.user import Schedule
+from app.models.resource import MeetingResource, Resource
+from app.models.user import Schedule, User
 from app.algorithm.scheduler import find_best_meeting_slots
 
 QUANT_MINUTES = 15
@@ -171,8 +171,10 @@ def create_meeting(db: Session, meeting_data: MeetingCreate, current_user_id: in
     # 1. Створюємо основний запис зустрічі
     new_meeting = Meeting(
         title=meeting_data.title,
+        description=meeting_data.description,
         start_time=meeting_data.start_time,
         end_time=meeting_data.end_time,
+        frequency=meeting_data.frequency,
         project_id=meeting_data.project_id,
         organizer_id=current_user_id
     )
@@ -209,3 +211,77 @@ def get_user_meetings(db: Session, user_id: int):
     return db.query(Meeting).join(MeetingParticipant).filter(
         MeetingParticipant.user_id == user_id
     ).all()
+
+def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> ValidateSlotResponse:
+    """Валідація з виводом імен та назв."""
+    start_dt = request.start_time.replace(tzinfo=None)
+    end_dt = request.end_time.replace(tzinfo=None)
+
+    user_ids = [u.id for u in request.users]
+    resource_ids = [r.id for r in request.resources]
+
+    users_db = db.query(User).filter(User.id.in_(user_ids)).all()
+    user_names = {u.id: u.full_name or u.email for u in users_db}
+    
+    resources_db = db.query(Resource).filter(Resource.id.in_(resource_ids)).all()
+    res_names = {r.id: r.name for r in resources_db}
+
+    conflicts = []
+    score = 0
+
+    # 1. Графіки
+    schedules = db.query(Schedule).filter(Schedule.user_id.in_(user_ids)).all()
+    sched_map = {s.user_id: {} for s in schedules}
+    for s in schedules:
+        sched_map[s.user_id][s.day_of_week] = s
+
+    current_date = start_dt.date()
+    while current_date <= end_dt.date():
+        day_of_week = current_date.weekday()
+        for u in request.users:
+            name = user_names.get(u.id, f"ID {u.id}")
+            s = sched_map.get(u.id, {}).get(day_of_week)
+            if not s or s.is_day_off:
+                conflicts.append(f"У {name} вихідний")
+                score += u.weight
+            else:
+                work_start = datetime.combine(current_date, s.start_time)
+                work_end = datetime.combine(current_date, s.end_time)
+                if start_dt < work_start or end_dt > work_end:
+                    conflicts.append(f"Час поза межами робочого дня {name}")
+                    score += u.weight
+        current_date += timedelta(days=1)
+
+    # 2. Зустрічі Користувачів
+    user_meetings = db.query(Meeting).join(MeetingParticipant).filter(
+        MeetingParticipant.user_id.in_(user_ids),
+        Meeting.start_time < end_dt,
+        Meeting.end_time > start_dt
+    ).all()
+
+    for m in user_meetings:
+        for mp in m.participants:
+            if mp.user_id in user_ids and mp.status != "Rejected":
+                name = user_names.get(mp.id, f"ID {mp.user_id}")
+                conflicts.append(f"{name} вже має зустріч: '{m.title}'")
+                score += next((u.weight for u in request.users if u.id == mp.user_id), 10)
+
+    # 3. Ресурси (Кімнати)
+    res_meetings = db.query(Meeting).join(MeetingResource).filter(
+        MeetingResource.resource_id.in_(resource_ids),
+        Meeting.start_time < end_dt,
+        Meeting.end_time > start_dt
+    ).all()
+
+    for m in res_meetings:
+        for mr in m.resources:
+            if mr.resource_id in resource_ids:
+                name = res_names.get(mr.resource_id, f"Кімната {mr.resource_id}")
+                conflicts.append(f"Кімната '{name}' зайнята: '{m.title}'")
+                score += next((r.weight for r in request.resources if r.id == mr.resource_id), 10)
+
+    return ValidateSlotResponse(
+        is_valid=len(list(set(conflicts))) == 0,
+        score=score,
+        conflicts=list(set(conflicts))
+    )
