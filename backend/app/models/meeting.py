@@ -6,6 +6,7 @@ from app.db.database import Base
 
 if TYPE_CHECKING:
     from app.models.resource import MeetingResource
+    from app.models.user import User
 
 class MeetingParticipant(Base):
     __tablename__ = "meeting_participants"
@@ -17,6 +18,19 @@ class MeetingParticipant(Base):
     status: Mapped[str] = mapped_column(String(50), default="Pending")
 
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="participants")
+    user: Mapped["User"] = relationship("User")
+
+    @property
+    def id(self) -> int:
+        return self.user_id
+
+    @property
+    def email(self) -> str:
+        return self.user.email if self.user else ""
+
+    @property
+    def full_name(self) -> Optional[str]:
+        return self.user.full_name if self.user else None
 
 class Meeting(Base):
     __tablename__ = "meetings"

@@ -12,10 +12,18 @@ class ParticipantDetail(BaseModel):
     full_name: Optional[str] = None
     email: str
     status: str
+    
+    model_config = {
+        "from_attributes": True
+    }
 
 class ResourceDetail(BaseModel):
     id: int
     name: str
+    
+    model_config = {
+        "from_attributes": True
+    }
 
 # Запит на пошук часу
 class FindSlotsRequest(BaseModel):

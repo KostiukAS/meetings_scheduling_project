@@ -6,9 +6,14 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
   const [editData, setEditData] = useState({ title: '', description: '', frequency: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [localMeeting, setLocalMeeting] = useState(null);
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [newParticipantId, setNewParticipantId] = useState('');
+  const [newParticipantType, setNewParticipantType] = useState('required');
 
   useEffect(() => {
     if (meeting) {
+      setLocalMeeting(meeting);
       setEditData({
         title: meeting.title,
         description: meeting.description || '',
@@ -18,14 +23,30 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
     }
   }, [meeting]);
 
-  if (!isOpen || !meeting) return null;
+  const isOrganizer = localMeeting && Number(localMeeting.organizer_id) === Number(currentUserId);
 
-  const isOrganizer = Number(meeting.organizer_id) === Number(currentUserId);
+  useEffect(() => {
+    if (!isOpen || !localMeeting || !isOrganizer) return;
+
+    const fetchUsers = async () => {
+      try {
+        const res = await api.get('/users/');
+        setAvailableUsers(res.data);
+      } catch (err) {
+        setError('Помилка завантаження користувачів');
+      }
+    };
+
+    fetchUsers();
+  }, [isOpen, localMeeting, isOrganizer]);
+
+  if (!isOpen || !localMeeting) return null;
 
   const handleUpdate = async () => {
     setLoading(true);
     try {
-      await api.patch(`/meetings/${meeting.id}`, editData);
+      await api.patch(`/meetings/${localMeeting.id}`, editData);
+      setLocalMeeting(prev => prev ? { ...prev, ...editData } : prev);
       onSuccess();
       setIsEditing(false);
     } catch (err) {
@@ -38,7 +59,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
   const handleDelete = async () => {
     if (!window.confirm("Ви впевнені?")) return;
     try {
-      await api.delete(`/meetings/${meeting.id}`);
+      await api.delete(`/meetings/${localMeeting.id}`);
       onSuccess();
       onClose();
     } catch (err) { setError("Помилка видалення"); }
@@ -46,10 +67,75 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
 
   const handleStatusChange = async (newStatus) => {
     try {
-      await api.patch(`/meetings/${meeting.id}/participants/${currentUserId}/status`, { status: newStatus });
+      await api.patch(`/meetings/${localMeeting.id}/participants/${currentUserId}/status`, { status: newStatus });
       onSuccess();
       onClose();
     } catch (err) { setError("Помилка зміни статусу"); }
+  };
+
+  const handleAddParticipant = async () => {
+    if (!newParticipantId) {
+      setError('Оберіть користувача');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const weight = newParticipantType === 'required' ? 1000000 : 10;
+      await api.post(`/meetings/${localMeeting.id}/participants`, {
+        user_id: Number(newParticipantId),
+        weight
+      });
+
+      const addedUser = availableUsers.find(u => Number(u.id) === Number(newParticipantId));
+      if (addedUser) {
+        setLocalMeeting(prev => {
+          if (!prev) return prev;
+          const nextParticipants = [
+            ...(prev.participants || []),
+            {
+              id: addedUser.id,
+              full_name: addedUser.full_name || null,
+              email: addedUser.email,
+              status: 'Waiting for response'
+            }
+          ];
+          return { ...prev, participants: nextParticipants };
+        });
+      }
+
+      setNewParticipantId('');
+      onSuccess();
+    } catch (err) {
+      setError('Помилка додавання учасника');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveParticipant = async (participantId) => {
+    if (!window.confirm('Видалити учасника зі зустрічі?')) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await api.delete(`/meetings/${localMeeting.id}/participants/${participantId}`);
+      setLocalMeeting(prev => {
+        if (!prev) return prev;
+        const nextParticipants = (prev.participants || []).filter(
+          p => Number(p.id) !== Number(participantId)
+        );
+        return { ...prev, participants: nextParticipants };
+      });
+      onSuccess();
+    } catch (err) {
+      setError('Помилка видалення учасника');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -86,25 +172,71 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
           </div>
         ) : (
           <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-            <p><strong>Назва:</strong> {meeting.title}</p>
-            <p><strong>Опис/Посилання:</strong> {meeting.description || <span style={{color: '#999'}}>Немає опису</span>}</p>
-            <p><strong>Час:</strong> {new Date(meeting.start).toLocaleString('uk-UA')} - {new Date(meeting.end).toLocaleTimeString('uk-UA')}</p>
+            <p><strong>Назва:</strong> {localMeeting.title}</p>
+            <p><strong>Опис/Посилання:</strong> {localMeeting.description || <span style={{color: '#999'}}>Немає опису</span>}</p>
+            <p><strong>Час:</strong> {new Date(localMeeting.start).toLocaleString('uk-UA')} - {new Date(localMeeting.end).toLocaleTimeString('uk-UA')}</p>
             
-            <p><strong>Кімнати:</strong> {meeting.resources?.length > 0 
-              ? meeting.resources.map(r => r.name).join(', ') 
+            <p><strong>Кімнати:</strong> {localMeeting.resources?.length > 0 
+              ? localMeeting.resources.map(r => r.name).join(', ') 
               : 'Онлайн (без кімнати)'}
             </p>
 
             <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
               <strong>Учасники:</strong>
               <ul style={{ paddingLeft: '20px' }}>
-                {meeting.participants?.map(p => (
-                  <li key={p.id}>
-                    {p.full_name || p.email} — <i>{p.status}</i>
+                {localMeeting.participants?.map(p => (
+                  <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>{p.full_name || p.email} — <i>{p.status}</i></span>
+                    {isOrganizer && Number(p.id) !== Number(localMeeting.organizer_id) && (
+                      <button
+                        onClick={() => handleRemoveParticipant(p.id)}
+                        style={removeMiniBtn}
+                        disabled={loading}
+                      >
+                        Видалити
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
             </div>
+
+            {isOrganizer && (
+              <div style={{ marginTop: '12px', borderTop: '1px dashed #eee', paddingTop: '10px' }}>
+                <strong>Додати учасника:</strong>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <select
+                    style={miniSelect}
+                    value={newParticipantId}
+                    onChange={e => setNewParticipantId(e.target.value)}
+                  >
+                    <option value="">Оберіть користувача</option>
+                    {availableUsers
+                      .filter(u => !(localMeeting.participants || []).some(p => Number(p.id) === Number(u.id)))
+                      .map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.full_name || u.email}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    style={miniSelect}
+                    value={newParticipantType}
+                    onChange={e => setNewParticipantType(e.target.value)}
+                  >
+                    <option value="required">Обов.</option>
+                    <option value="optional">Опц.</option>
+                  </select>
+                  <button
+                    onClick={handleAddParticipant}
+                    style={addMiniBtn}
+                    disabled={loading || !newParticipantId}
+                  >
+                    Додати
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -145,5 +277,8 @@ const primaryBtnStyle = { flex: 1, padding: '10px', background: '#007bff', color
 const successBtnStyle = { flex: 1, padding: '10px', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
 const dangerBtnStyle = { flex: 1, padding: '10px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
 const tab = { flex: 1, padding: '10px', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' };
+const miniSelect = { padding: '6px', border: '1px solid #ccc', borderRadius: '4px', flex: 1 };
+const addMiniBtn = { padding: '6px 10px', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
+const removeMiniBtn = { padding: '4px 8px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' };
 
 export default MeetingDetailsModal;

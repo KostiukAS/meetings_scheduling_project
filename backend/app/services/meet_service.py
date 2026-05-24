@@ -1,12 +1,35 @@
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, ValidateSlotRequest, ValidateSlotResponse
+from datetime import datetime, timedelta, timezone, time, date
+from zoneinfo import ZoneInfo
+from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, ValidateSlotRequest, ValidateSlotResponse, ParticipantItem
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.resource import MeetingResource, Resource
 from app.models.user import Schedule, User
 from app.algorithm.scheduler import find_best_meeting_slots
+from app.core.config import settings
 
 QUANT_MINUTES = 15
+APP_TZ = ZoneInfo(settings.APP_TIMEZONE)
+
+def request_dt_to_local(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(APP_TZ).replace(tzinfo=None)
+
+def request_dt_to_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=APP_TZ)
+    else:
+        dt = dt.astimezone(APP_TZ)
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+def utc_db_dt_to_local(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(APP_TZ).replace(tzinfo=None)
+
+def utc_time_to_local_datetime(date_value: date, t: time) -> datetime:
+    return datetime.combine(date_value, t, tzinfo=timezone.utc).astimezone(APP_TZ).replace(tzinfo=None)
 
 def dt_to_quant(dt: datetime, base_dt: datetime) -> int:
     delta = dt - base_dt
@@ -15,14 +38,14 @@ def dt_to_quant(dt: datetime, base_dt: datetime) -> int:
 def quant_to_dt(q: int, base_dt: datetime) -> datetime:
     return base_dt + timedelta(minutes=q * QUANT_MINUTES)
 
-def project_recurring_busy(busy_list, meeting, search_start, search_end, base_dt, resource_prefix, res_id):
-    meeting_duration = meeting.end_time - meeting.start_time
-    current_occurrence_start = meeting.start_time
+def project_recurring_busy(busy_list, start_time, end_time, frequency, search_start, search_end, base_dt, resource_prefix, res_id):
+    meeting_duration = end_time - start_time
+    current_occurrence_start = start_time
     
     step = None
-    if meeting.frequency == "daily":
+    if frequency == "daily":
         step = timedelta(days=1)
-    elif meeting.frequency == "weekly":
+    elif frequency == "weekly":
         step = timedelta(weeks=1)
     
     if not step:
@@ -41,8 +64,10 @@ def project_recurring_busy(busy_list, meeting, search_start, search_end, base_dt
         current_occurrence_start += step
 
 def find_available_slots(db: Session, request: FindSlotsRequest):
-    search_start = request.search_start.replace(tzinfo=None)
-    search_end = request.search_end.replace(tzinfo=None)
+    search_start = request_dt_to_local(request.search_start)
+    search_end = request_dt_to_local(request.search_end)
+    search_start_utc = request_dt_to_utc(request.search_start)
+    search_end_utc = request_dt_to_utc(request.search_end)
     
     base_dt = search_start 
     
@@ -87,7 +112,7 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                         "end_quantum": dt_to_quant(day_end, base_dt)
                     })
                 else:
-                    work_start = datetime.combine(current_date, s.start_time)
+                    work_start = utc_time_to_local_datetime(current_date, s.start_time)
                     if work_start > day_start:
                         busy.append({
                             "resource_id": f"u_{u_id}",
@@ -95,7 +120,7 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             "end_quantum": dt_to_quant(work_start, base_dt)
                         })
                         
-                    work_end = datetime.combine(current_date, s.end_time)
+                    work_end = utc_time_to_local_datetime(current_date, s.end_time)
                     if work_end < day_end:
                         busy.append({
                             "resource_id": f"u_{u_id}",
@@ -108,40 +133,64 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
     if user_ids:
         user_meetings = db.query(Meeting).join(MeetingParticipant).filter(
             MeetingParticipant.user_id.in_(user_ids),
-            Meeting.start_time < search_end
+            Meeting.start_time < search_end_utc
         ).all()
         
         for m in user_meetings:
+            m_start_local = utc_db_dt_to_local(m.start_time)
+            m_end_local = utc_db_dt_to_local(m.end_time)
             for mp in m.participants:
                 if mp.user_id in user_ids and mp.status != "Rejected":
                     if m.frequency == "once" or not m.frequency:
-                        if m.end_time > search_start:
+                        if m_end_local > search_start:
                             busy.append({
                                 "resource_id": f"u_{mp.user_id}",
-                                "start_quantum": max(0, dt_to_quant(m.start_time, base_dt)),
-                                "end_quantum": dt_to_quant(m.end_time, base_dt)
+                                "start_quantum": max(0, dt_to_quant(m_start_local, base_dt)),
+                                "end_quantum": dt_to_quant(m_end_local, base_dt)
                             })
                     else:
-                        project_recurring_busy(busy, m, search_start, search_end, base_dt, "u", mp.user_id)
+                        project_recurring_busy(
+                            busy,
+                            m_start_local,
+                            m_end_local,
+                            m.frequency,
+                            search_start,
+                            search_end,
+                            base_dt,
+                            "u",
+                            mp.user_id
+                        )
 
     if resource_ids:
         res_meetings = db.query(Meeting).join(MeetingResource).filter(
             MeetingResource.resource_id.in_(resource_ids), 
-            Meeting.start_time < search_end
+            Meeting.start_time < search_end_utc
         ).all()
         
         for m in res_meetings:
+            m_start_local = utc_db_dt_to_local(m.start_time)
+            m_end_local = utc_db_dt_to_local(m.end_time)
             for mr in m.resources: 
                 if mr.resource_id in resource_ids:
                     if m.frequency == "once" or not m.frequency:
-                        if m.end_time > search_start:
+                        if m_end_local > search_start:
                             busy.append({
                                 "resource_id": f"r_{mr.resource_id}",
-                                "start_quantum": max(0, dt_to_quant(m.start_time, base_dt)),
-                                "end_quantum": dt_to_quant(m.end_time, base_dt)
+                                "start_quantum": max(0, dt_to_quant(m_start_local, base_dt)),
+                                "end_quantum": dt_to_quant(m_end_local, base_dt)
                             })
                     else:
-                        project_recurring_busy(busy, m, search_start, search_end, base_dt, "r", mr.resource_id)
+                        project_recurring_busy(
+                            busy,
+                            m_start_local,
+                            m_end_local,
+                            m.frequency,
+                            search_start,
+                            search_end,
+                            base_dt,
+                            "r",
+                            mr.resource_id
+                        )
         
     best_quanta_slots = find_best_meeting_slots(
         d=d_quant,
@@ -183,12 +232,24 @@ def create_meeting(db: Session, meeting_data: MeetingCreate, current_user_id: in
     db.refresh(new_meeting)
 
     # 2. Додаємо учасників у зв'язну таблицю
+    participants_by_id = {}
     for p in meeting_data.participants:
+        if p.id not in participants_by_id:
+            participants_by_id[p.id] = p
+
+    if current_user_id not in participants_by_id:
+        participants_by_id[current_user_id] = ParticipantItem(
+            id=current_user_id,
+            weight=1_000_000
+        )
+
+    for p in participants_by_id.values():
+        status = "Accepted" if p.id == current_user_id else "Waiting for response"
         mp = MeetingParticipant(
-            meeting_id=new_meeting.id, 
-            user_id=p.id, 
-            weight=p.weight, 
-            status="Waiting for response"
+            meeting_id=new_meeting.id,
+            user_id=p.id,
+            weight=p.weight,
+            status=status
         )
         db.add(mp)
 
@@ -214,8 +275,10 @@ def get_user_meetings(db: Session, user_id: int):
 
 def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> ValidateSlotResponse:
     """Валідація з виводом імен та назв."""
-    start_dt = request.start_time.replace(tzinfo=None)
-    end_dt = request.end_time.replace(tzinfo=None)
+    start_dt = request_dt_to_local(request.start_time)
+    end_dt = request_dt_to_local(request.end_time)
+    start_dt_utc = request_dt_to_utc(request.start_time)
+    end_dt_utc = request_dt_to_utc(request.end_time)
 
     user_ids = [u.id for u in request.users]
     resource_ids = [r.id for r in request.resources]
@@ -245,8 +308,8 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
                 conflicts.append(f"У {name} вихідний")
                 score += u.weight
             else:
-                work_start = datetime.combine(current_date, s.start_time)
-                work_end = datetime.combine(current_date, s.end_time)
+                work_start = utc_time_to_local_datetime(current_date, s.start_time)
+                work_end = utc_time_to_local_datetime(current_date, s.end_time)
                 if start_dt < work_start or end_dt > work_end:
                     conflicts.append(f"Час поза межами робочого дня {name}")
                     score += u.weight
@@ -255,8 +318,8 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
     # 2. Зустрічі Користувачів
     user_meetings = db.query(Meeting).join(MeetingParticipant).filter(
         MeetingParticipant.user_id.in_(user_ids),
-        Meeting.start_time < end_dt,
-        Meeting.end_time > start_dt
+        Meeting.start_time < end_dt_utc,
+        Meeting.end_time > start_dt_utc
     ).all()
 
     for m in user_meetings:
@@ -269,8 +332,8 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
     # 3. Ресурси (Кімнати)
     res_meetings = db.query(Meeting).join(MeetingResource).filter(
         MeetingResource.resource_id.in_(resource_ids),
-        Meeting.start_time < end_dt,
-        Meeting.end_time > start_dt
+        Meeting.start_time < end_dt_utc,
+        Meeting.end_time > start_dt_utc
     ).all()
 
     for m in res_meetings:

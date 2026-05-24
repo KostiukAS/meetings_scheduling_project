@@ -60,7 +60,6 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
       weekLater.setDate(now.getDate() + 7);
       finalEnd = weekLater.toISOString();
     } else if (scenario === '2') {
-      // searchStart тут - це дата обрана користувачем
       const day = new Date(searchStart);
       day.setHours(9, 0, 0, 0);
       finalStart = day.toISOString();
@@ -68,23 +67,40 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
       finalEnd = day.toISOString();
     }
 
-    const payload = {
-      title, description, duration: Number(duration), frequency,
-      start_time: finalStart, end_time: finalEnd,
-      users: Object.entries(participants).map(([id, type]) => ({ id: Number(id), weight: type === 'required' ? 1000000 : 10 })),
-      resources: Object.entries(resources).map(([id, type]) => ({ id: Number(id), weight: type === 'required' ? 1000000 : 10 }))
-    };
+    // Спільні масиви користувачів та ресурсів
+    const mappedUsers = Object.entries(participants).map(([id, type]) => ({ 
+      id: Number(id), weight: type === 'required' ? 1000000 : 10 
+    }));
+    const mappedResources = Object.entries(resources).map(([id, type]) => ({ 
+      id: Number(id), weight: type === 'required' ? 1000000 : 10 
+    }));
 
     try {
       if (scenario === '4') {
-        const res = await api.post('/meetings/validate-slot', payload);
+        // payload для validate-slot (Сценарій 4)
+        const validatePayload = {
+          start_time: finalStart,
+          end_time: finalEnd,
+          users: mappedUsers,
+          resources: mappedResources
+        };
+        const res = await api.post('/meetings/validate-slot', validatePayload);
         setValidationResult(res.data);
       } else {
-        const res = await api.post('/meetings/find-slots', payload);
+        // payload для find-slots (Сценарії 1, 2, 3)
+        const findPayload = {
+          duration_minutes: Number(duration),
+          search_start: finalStart,
+          search_end: finalEnd,
+          users: mappedUsers,
+          resources: mappedResources
+        };
+        const res = await api.post('/meetings/find-slots', findPayload);
         setSlots(res.data);
       }
     } catch (err) {
-      setError('Помилка обробки запиту');
+      console.error(err);
+      setError('Помилка обробки запиту. Перевірте введені дані.');
     } finally {
       setLoading(false);
     }

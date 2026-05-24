@@ -43,7 +43,13 @@ const Dashboard = () => {
           id: meeting.id,
           title: meeting.title,
           backgroundColor: meeting.organizer_id === userId ? '#28a745' : '#3788d8',
-          extendedProps: { organizer_id: meeting.organizer_id, frequency: meeting.frequency }
+          extendedProps: {
+            organizer_id: meeting.organizer_id,
+            frequency: meeting.frequency,
+            description: meeting.description,
+            participants: meeting.participants,
+            resources: meeting.resources
+          }
         };
 
         if (meeting.frequency === 'once' || !meeting.frequency) {
@@ -104,7 +110,10 @@ const Dashboard = () => {
       start: clickInfo.event.startStr,
       end: clickInfo.event.endStr,
       organizer_id: clickInfo.event.extendedProps.organizer_id,
-      frequency: clickInfo.event.extendedProps.frequency
+      frequency: clickInfo.event.extendedProps.frequency,
+      description: clickInfo.event.extendedProps.description,
+      participants: clickInfo.event.extendedProps.participants,
+      resources: clickInfo.event.extendedProps.resources
     });
     setIsDetailsModalOpen(true);
   };

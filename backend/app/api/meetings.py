@@ -100,12 +100,26 @@ def add_participant_to_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="Зустріч не знайдено")
         
-    # 2. Додаємо запис у таблицю зв'язку
+    # 2. Перевіряємо права доступу
+    if meeting.organizer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Тільки організатор може додавати учасників")
+
+    if participant.user_id == meeting.organizer_id:
+        raise HTTPException(status_code=400, detail="Організатор вже є учасником")
+
+    existing = db.query(MeetingParticipant).filter(
+        MeetingParticipant.meeting_id == meeting_id,
+        MeetingParticipant.user_id == participant.user_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Користувач вже є учасником")
+
+    # 3. Додаємо запис у таблицю зв'язку
     new_participant = MeetingParticipant(
         meeting_id=meeting_id,
         user_id=participant.user_id,
         weight=participant.weight,
-        status="Pending"
+        status="Waiting for response"
     )
     db.add(new_participant)
     db.commit()
@@ -205,6 +219,9 @@ def remove_participant_from_meeting(
 
     if meeting.organizer_id != current_user.id:
         raise HTTPException(status_code=403, detail="Тільки організатор може видаляти учасників")
+
+    if meeting.organizer_id == user_id:
+        raise HTTPException(status_code=400, detail="Неможливо видалити організатора")
 
     participant = db.query(MeetingParticipant).filter(
         MeetingParticipant.meeting_id == meeting_id,
