@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from datetime import datetime
+from pydantic import BaseModel, field_serializer
+from datetime import datetime, timezone
 from typing import List, Optional
 
 # Схема для передачі учасника або ресурсу з його вагою
@@ -39,6 +39,12 @@ class SlotResponse(BaseModel):
     end_time: datetime
     score: int
 
+    @field_serializer("start_time", "end_time")
+    def serialize_slot_dt(self, dt: datetime):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
 class MeetingBase(BaseModel):
     title: str
     description: Optional[str] = None
@@ -68,6 +74,12 @@ class MeetingResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+    @field_serializer("start_time", "end_time")
+    def serialize_meeting_dt(self, dt: datetime):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
     
 class ParticipantStatusUpdate(BaseModel):
     status: str # "Accepted", "Rejected", або "Pending"

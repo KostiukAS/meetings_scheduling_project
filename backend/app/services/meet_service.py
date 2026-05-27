@@ -38,6 +38,16 @@ def dt_to_quant(dt: datetime, base_dt: datetime) -> int:
 def quant_to_dt(q: int, base_dt: datetime) -> datetime:
     return base_dt + timedelta(minutes=q * QUANT_MINUTES)
 
+def floor_to_quantum(dt: datetime) -> datetime:
+    minutes = (dt.minute // QUANT_MINUTES) * QUANT_MINUTES
+    return dt.replace(minute=minutes, second=0, microsecond=0)
+
+def ceil_to_quantum(dt: datetime) -> datetime:
+    floored = floor_to_quantum(dt)
+    if floored < dt:
+        return floored + timedelta(minutes=QUANT_MINUTES)
+    return floored
+
 def project_recurring_busy(busy_list, start_time, end_time, frequency, search_start, search_end, base_dt, resource_prefix, res_id):
     meeting_duration = end_time - start_time
     current_occurrence_start = start_time
@@ -68,11 +78,12 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
     search_end = request_dt_to_local(request.search_end)
     search_start_utc = request_dt_to_utc(request.search_start)
     search_end_utc = request_dt_to_utc(request.search_end)
-    
-    base_dt = search_start 
-    
+
+    base_dt = floor_to_quantum(search_start)
+    aligned_start = ceil_to_quantum(search_start)
+
     d_quant = request.duration_minutes // QUANT_MINUTES
-    t_start = 0
+    t_start = dt_to_quant(aligned_start, base_dt)
     t_end = dt_to_quant(search_end, base_dt)
     
     r_m = []
@@ -204,10 +215,13 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
     for slot in best_quanta_slots:
         start_dt = quant_to_dt(slot["start_time"], base_dt)
         end_dt = quant_to_dt(slot["end_time"] + 1, base_dt) 
+
+        start_utc = request_dt_to_utc(start_dt)
+        end_utc = request_dt_to_utc(end_dt)
         
         result.append(SlotResponse(
-            start_time=start_dt,
-            end_time=end_dt,
+            start_time=start_utc,
+            end_time=end_utc,
             score=slot["score"]
         ))
         
@@ -221,8 +235,8 @@ def create_meeting(db: Session, meeting_data: MeetingCreate, current_user_id: in
     new_meeting = Meeting(
         title=meeting_data.title,
         description=meeting_data.description,
-        start_time=meeting_data.start_time,
-        end_time=meeting_data.end_time,
+        start_time=request_dt_to_utc(meeting_data.start_time),
+        end_time=request_dt_to_utc(meeting_data.end_time),
         frequency=meeting_data.frequency,
         project_id=meeting_data.project_id,
         organizer_id=current_user_id

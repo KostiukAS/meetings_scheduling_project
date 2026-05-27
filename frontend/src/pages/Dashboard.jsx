@@ -8,6 +8,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import api from '../api/axios';
 import ScheduleModal from '../components/ScheduleModal';
 import MeetingDetailsModal from '../components/MeetingDetailsModal'; 
+import { hasAllPermission } from '../utils/permissions';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -19,6 +20,11 @@ const Dashboard = () => {
 
   // ДОДАНО: Стан для зберігання поточного користувача
   const [currentUser, setCurrentUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Home | Meetings Scheduler';
+  }, []);
 
   // ДОДАНО: Функція для отримання профілю користувача
   const fetchCurrentUser = async () => {
@@ -30,14 +36,30 @@ const Dashboard = () => {
     }
   };
 
+  const fetchRolePermissions = async (roleId) => {
+    if (!roleId) {
+      setIsAdmin(false);
+      return;
+    }
+
+    try {
+      const response = await api.get('/roles/');
+      const role = response.data.find((item) => Number(item.id) === Number(roleId));
+      setIsAdmin(hasAllPermission(role?.permissions));
+    } catch (error) {
+      if (error.response?.status === 401) handleLogout();
+      setIsAdmin(false);
+    }
+  };
+
   const fetchMeetings = async (userId) => {
       try {
       const response = await api.get('/meetings/');
       const formattedEvents = [];
 
       response.data.forEach(meeting => {
-        const startUTC = meeting.start_time.endsWith('Z') ? meeting.start_time : `${meeting.start_time}Z`;
-        const endUTC = meeting.end_time.endsWith('Z') ? meeting.end_time : `${meeting.end_time}Z`;
+        const startLocal = meeting.start_time;
+        const endLocal = meeting.end_time;
         
         const baseEvent = {
           id: meeting.id,
@@ -55,24 +77,24 @@ const Dashboard = () => {
         if (meeting.frequency === 'once' || !meeting.frequency) {
           formattedEvents.push({
             ...baseEvent,
-            start: startUTC,
-            end: endUTC
+            start: startLocal,
+            end: endLocal
           });
         } else if (meeting.frequency === 'daily') {
           formattedEvents.push({
             ...baseEvent,
-            startTime: new Date(startUTC).toLocaleTimeString('en-GB', { hour12: false }),
-            endTime: new Date(endUTC).toLocaleTimeString('en-GB', { hour12: false }),
-            startRecur: startUTC, // Починати відображати з дати створення
+            startTime: new Date(startLocal).toLocaleTimeString('en-GB', { hour12: false }),
+            endTime: new Date(endLocal).toLocaleTimeString('en-GB', { hour12: false }),
+            startRecur: startLocal, // Починати відображати з дати створення
             daysOfWeek: [1, 2, 3, 4, 5]
           });
         } else if (meeting.frequency === 'weekly') {
-          const dayNum = new Date(startUTC).getDay(); // Отримуємо день тижня (0-6)
+          const dayNum = new Date(startLocal).getDay(); // Отримуємо день тижня (0-6)
           formattedEvents.push({
             ...baseEvent,
-            startTime: new Date(startUTC).toLocaleTimeString('en-GB', { hour12: false }),
-            endTime: new Date(endUTC).toLocaleTimeString('en-GB', { hour12: false }),
-            startRecur: startUTC,
+            startTime: new Date(startLocal).toLocaleTimeString('en-GB', { hour12: false }),
+            endTime: new Date(endLocal).toLocaleTimeString('en-GB', { hour12: false }),
+            startRecur: startLocal,
             daysOfWeek: [dayNum]
           });
         }
@@ -98,6 +120,12 @@ const Dashboard = () => {
     }
   }, [currentUser]);
 
+  useEffect(() => {
+    if (currentUser) {
+      fetchRolePermissions(currentUser.role_id);
+    }
+  }, [currentUser]);
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -118,30 +146,50 @@ const Dashboard = () => {
     setIsDetailsModalOpen(true);
   };
 
+  const nameText = currentUser?.full_name?.trim() || currentUser?.email || '';
+  const emailText = currentUser?.full_name?.trim() ? currentUser?.email || '' : '';
+
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1200px', margin: '0 auto' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1>Мій розклад {currentUser && `(${currentUser.email})`}</h1>
+    <div className="dashboard-page">
+      <header className="dashboard-header">
         <div>
-          <button 
-            onClick={() => setIsScheduleModalOpen(true)} 
-            style={{ padding: '10px 20px', marginRight: '10px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          <p className="dashboard-eyebrow">Панель користувача</p>
+          {(nameText || emailText) && (
+            <div className="dashboard-identity">
+              {nameText && <p className="dashboard-identity-name">{nameText}</p>}
+              {emailText && <p className="dashboard-identity-email">{emailText}</p>}
+            </div>
+          )}
+          <h1 className="dashboard-title">Мій розклад</h1>
+        </div>
+        <div className="dashboard-actions">
+          {isAdmin && (
+            <button onClick={() => navigate('/admin')} className="btn btn-warning">
+              Панель адміністратора
+            </button>
+          )}
+          <button
+            onClick={() => setIsScheduleModalOpen(true)}
+            className="btn btn-primary"
           >
             + Запланувати зустріч
           </button>
-          <button onClick={handleLogout} style={{ padding: '10px 20px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          <button onClick={handleLogout} className="btn btn-danger">
             Вийти
           </button>
         </div>
       </header>
 
-      <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+      <div className="card calendar-card">
         <FullCalendar
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView="timeGridWeek"
           headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' }}
           slotMinTime="08:00:00"
           slotMaxTime="20:00:00"
+          slotDuration="00:15:00"
+          slotLabelInterval="00:30:00"
+          slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
           allDaySlot={false}
           events={events}
           height="auto"
@@ -153,11 +201,11 @@ const Dashboard = () => {
       </div>
 
       {/* ЗМІНЕНО: Передаємо currentUserId як prop */}
-      <ScheduleModal 
-        isOpen={isScheduleModalOpen} 
-        onClose={() => setIsScheduleModalOpen(false)} 
-        onSuccess={() => fetchMeetings(currentUser.id)} 
-        currentUserId={currentUser?.id} 
+      <ScheduleModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
+        onSuccess={() => fetchMeetings(currentUser.id)}
+        currentUserId={currentUser?.id}
       />
 
       {/* ЗМІНЕНО: Передаємо currentUserId як prop */}

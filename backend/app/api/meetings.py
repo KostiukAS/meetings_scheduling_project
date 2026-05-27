@@ -180,6 +180,11 @@ def update_meeting(
             )
 
     update_data = meeting_update.model_dump(exclude_unset=True)
+    if "start_time" in update_data and update_data["start_time"]:
+        update_data["start_time"] = meet_service.request_dt_to_utc(update_data["start_time"])
+    if "end_time" in update_data and update_data["end_time"]:
+        update_data["end_time"] = meet_service.request_dt_to_utc(update_data["end_time"])
+
     for key, value in update_data.items():
         setattr(meeting, key, value)
         

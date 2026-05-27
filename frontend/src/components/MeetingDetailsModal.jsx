@@ -139,30 +139,30 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
   };
 
   return (
-    <div style={overlayStyle}>
-      <div style={modalStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-          <h2>{isEditing ? "Редагування" : "Деталі зустрічі"}</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+    <div className="modal-overlay">
+      <div className="modal-card">
+        <div className="modal-header">
+          <h2 className="modal-title">{isEditing ? "Редагування" : "Деталі зустрічі"}</h2>
+          <button onClick={onClose} className="icon-button">✕</button>
         </div>
 
         {isEditing ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <input 
-              style={inputStyle} 
-              value={editData.title} 
-              onChange={e => setEditData({...editData, title: e.target.value})} 
+          <div className="form-stack">
+            <input
+              className="form-control"
+              value={editData.title}
+              onChange={e => setEditData({...editData, title: e.target.value})}
               placeholder="Назва"
             />
-            <textarea 
-              style={{ ...inputStyle, height: '80px' }} 
-              value={editData.description} 
-              onChange={e => setEditData({...editData, description: e.target.value})} 
+            <textarea
+              className="form-control form-textarea-lg"
+              value={editData.description}
+              onChange={e => setEditData({...editData, description: e.target.value})}
               placeholder="Опис або посилання"
             />
-            <select 
-              style={inputStyle} 
-              value={editData.frequency} 
+            <select
+              className="form-control"
+              value={editData.frequency}
               onChange={e => setEditData({...editData, frequency: e.target.value})}
             >
               <option value="once">Один раз</option>
@@ -171,9 +171,9 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
             </select>
           </div>
         ) : (
-          <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
+          <div className="modal-body">
             <p><strong>Назва:</strong> {localMeeting.title}</p>
-            <p><strong>Опис/Посилання:</strong> {localMeeting.description || <span style={{color: '#999'}}>Немає опису</span>}</p>
+            <p><strong>Опис/Посилання:</strong> {localMeeting.description || <span className="text-muted">Немає опису</span>}</p>
             <p><strong>Час:</strong> {new Date(localMeeting.start).toLocaleString('uk-UA')} - {new Date(localMeeting.end).toLocaleTimeString('uk-UA')}</p>
             
             <p><strong>Кімнати:</strong> {localMeeting.resources?.length > 0 
@@ -181,16 +181,16 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
               : 'Онлайн (без кімнати)'}
             </p>
 
-            <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+            <div className="section-divider">
               <strong>Учасники:</strong>
-              <ul style={{ paddingLeft: '20px' }}>
+              <ul className="details-list">
                 {localMeeting.participants?.map(p => (
-                  <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <li key={p.id} className="details-item">
                     <span>{p.full_name || p.email} — <i>{p.status}</i></span>
                     {isOrganizer && Number(p.id) !== Number(localMeeting.organizer_id) && (
                       <button
                         onClick={() => handleRemoveParticipant(p.id)}
-                        style={removeMiniBtn}
+                        className="btn btn-danger btn-xs"
                         disabled={loading}
                       >
                         Видалити
@@ -202,11 +202,11 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
             </div>
 
             {isOrganizer && (
-              <div style={{ marginTop: '12px', borderTop: '1px dashed #eee', paddingTop: '10px' }}>
+              <div className="section-divider dashed">
                 <strong>Додати учасника:</strong>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <div className="form-row">
                   <select
-                    style={miniSelect}
+                    className="form-control"
                     value={newParticipantId}
                     onChange={e => setNewParticipantId(e.target.value)}
                   >
@@ -220,7 +220,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
                       ))}
                   </select>
                   <select
-                    style={miniSelect}
+                    className="form-control"
                     value={newParticipantType}
                     onChange={e => setNewParticipantType(e.target.value)}
                   >
@@ -229,7 +229,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
                   </select>
                   <button
                     onClick={handleAddParticipant}
-                    style={addMiniBtn}
+                    className="btn btn-primary"
                     disabled={loading || !newParticipantId}
                   >
                     Додати
@@ -240,27 +240,27 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
           </div>
         )}
 
-        {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
+        {error && <p className="text-danger">{error}</p>}
 
-        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+        <div className="modal-actions">
           {isOrganizer ? (
             <>
               {isEditing ? (
                 <>
-                  <button onClick={handleUpdate} disabled={loading} style={successBtnStyle}>Зберегти</button>
-                  <button onClick={() => setIsEditing(false)} style={tab}>Скасувати</button>
+                  <button onClick={handleUpdate} disabled={loading} className="btn btn-success">Зберегти</button>
+                  <button onClick={() => setIsEditing(false)} className="btn btn-muted">Скасувати</button>
                 </>
               ) : (
                 <>
-                  <button onClick={() => setIsEditing(true)} style={primaryBtnStyle}>Редагувати</button>
-                  <button onClick={handleDelete} style={dangerBtnStyle}>Видалити</button>
+                  <button onClick={() => setIsEditing(true)} className="btn btn-primary">Редагувати</button>
+                  <button onClick={handleDelete} className="btn btn-danger">Видалити</button>
                 </>
               )}
             </>
           ) : (
             <>
-              <button onClick={() => handleStatusChange("Accepted")} style={successBtnStyle}>Прийду</button>
-              <button onClick={() => handleStatusChange("Rejected")} style={dangerBtnStyle}>Не прийду</button>
+              <button onClick={() => handleStatusChange("Accepted")} className="btn btn-success">Прийду</button>
+              <button onClick={() => handleStatusChange("Rejected")} className="btn btn-danger">Не прийду</button>
             </>
           )}
         </div>
@@ -268,17 +268,5 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
     </div>
   );
 };
-
-// Стилі (ідентичні іншим модалкам)
-const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
-const modalStyle = { backgroundColor: 'white', padding: '25px', borderRadius: '8px', width: '450px', maxHeight: '90vh', overflowY: 'auto' };
-const inputStyle = { padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '100%', boxSizing: 'border-box' };
-const primaryBtnStyle = { flex: 1, padding: '10px', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
-const successBtnStyle = { flex: 1, padding: '10px', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
-const dangerBtnStyle = { flex: 1, padding: '10px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
-const tab = { flex: 1, padding: '10px', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' };
-const miniSelect = { padding: '6px', border: '1px solid #ccc', borderRadius: '4px', flex: 1 };
-const addMiniBtn = { padding: '6px 10px', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' };
-const removeMiniBtn = { padding: '4px 8px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' };
 
 export default MeetingDetailsModal;
