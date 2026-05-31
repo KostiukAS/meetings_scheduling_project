@@ -1,16 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
 
 const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
-  const [scenario, setScenario] = useState('1'); // 1, 2, 3, 4
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [duration, setDuration] = useState(60);
   const [frequency, setFrequency] = useState('once');
   
-  // Дати для пошуку
-  const [searchStart, setSearchStart] = useState('');
-  const [searchEnd, setSearchEnd] = useState('');
+  // Дата/час для сценаріїв 2 та 4
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingStartTime, setMeetingStartTime] = useState('');
+
+  // Діапазон для сценарію 3
+  const [rangeStartDate, setRangeStartDate] = useState('');
+  const [rangeStartTime, setRangeStartTime] = useState('');
+  const [rangeEndDate, setRangeEndDate] = useState('');
+  const [rangeEndTime, setRangeEndTime] = useState('');
   
   const [availableUsers, setAvailableUsers] = useState([]);
   const [availableResources, setAvailableResources] = useState([]);
@@ -22,16 +27,70 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
 
   const [slots, setSlots] = useState([]);
   const [validationResult, setValidationResult] = useState(null);
+  const [validatedSlot, setValidatedSlot] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const resetFormState = useCallback(() => {
+    setTitle('');
+    setDescription('');
+    setDuration(60);
+    setFrequency('once');
+    setMeetingDate('');
+    setMeetingStartTime('');
+    setRangeStartDate('');
+    setRangeStartTime('');
+    setRangeEndDate('');
+    setRangeEndTime('');
+    setParticipants({});
+    setResources({});
+    setSelectedProject(1);
+    setSlots([]);
+    setValidationResult(null);
+    setValidatedSlot(null);
+    setLoading(false);
+    setError('');
+  }, []);
+
+  const getActiveScenario = () => {
+    const hasRange = rangeStartDate || rangeStartTime || rangeEndDate || rangeEndTime;
+    if (hasRange) return '3';
+    if (meetingDate && meetingStartTime) return '4';
+    if (meetingDate) return '2';
+    return '1';
+  };
+
+  const activeScenario = getActiveScenario();
+  const scenarioLabel = {
+    1: 'Сц. 1 (Авто)',
+    2: 'Сц. 2 (День)',
+    3: 'Сц. 3 (Діапазон)',
+    4: 'Сц. 4 (Точний час)'
+  }[activeScenario];
+
   useEffect(() => {
     if (isOpen) {
+      resetFormState();
       fetchLists();
+    } else {
+      resetFormState();
+    }
+  }, [isOpen, resetFormState]);
+
+  useEffect(() => {
+    if (isOpen) {
       setParticipants({ [currentUserId]: 'required' });
-      setScenario('1');
     }
   }, [isOpen, currentUserId]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
 
   const fetchLists = async () => {
     const [u, r, p] = await Promise.all([
@@ -48,24 +107,66 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     setError('');
     setSlots([]);
     setValidationResult(null);
+    setValidatedSlot(null);
 
-    let finalStart = searchStart;
-    let finalEnd = searchEnd;
+    const durationMinutes = Number(duration);
+    const scenario = getActiveScenario();
+    let startDate;
+    let endDate;
+
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+      setError('Вкажіть коректну тривалість зустрічі.');
+      setLoading(false);
+      return;
+    }
 
     // Логіка сценаріїв для формування часових меж
-    const now = new Date();
     if (scenario === '1') {
-      finalStart = now.toISOString();
-      const weekLater = new Date();
-      weekLater.setDate(now.getDate() + 7);
-      finalEnd = weekLater.toISOString();
+      const now = new Date();
+      startDate = now;
+      endDate = new Date(now);
+      endDate.setDate(now.getDate() + 7);
     } else if (scenario === '2') {
-      const day = new Date(searchStart);
-      day.setHours(9, 0, 0, 0);
-      finalStart = day.toISOString();
-      day.setHours(18, 0, 0, 0);
-      finalEnd = day.toISOString();
+      if (!meetingDate) {
+        setError('Для сценарію 2 оберіть дату зустрічі.');
+        setLoading(false);
+        return;
+      }
+      startDate = new Date(`${meetingDate}T09:00`);
+      endDate = new Date(`${meetingDate}T18:00`);
+    } else if (scenario === '3') {
+      if (!rangeStartDate || !rangeStartTime || !rangeEndDate || !rangeEndTime) {
+        setError('Для сценарію 3 заповніть початок і кінець діапазону.');
+        setLoading(false);
+        return;
+      }
+      startDate = new Date(`${rangeStartDate}T${rangeStartTime}`);
+      endDate = new Date(`${rangeEndDate}T${rangeEndTime}`);
+    } else if (scenario === '4') {
+      if (!meetingDate || !meetingStartTime) {
+        setError('Для сценарію 4 оберіть дату і час початку.');
+        setLoading(false);
+        return;
+      }
+      startDate = new Date(`${meetingDate}T${meetingStartTime}`);
+      endDate = new Date(startDate);
+      endDate.setMinutes(startDate.getMinutes() + durationMinutes);
     }
+
+    if (!startDate || !endDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      setError('Перевірте коректність дати та часу.');
+      setLoading(false);
+      return;
+    }
+
+    if (endDate <= startDate) {
+      setError('Час закінчення має бути пізніше за початок.');
+      setLoading(false);
+      return;
+    }
+
+    const finalStart = startDate.toISOString();
+    const finalEnd = endDate.toISOString();
 
     // Спільні масиви користувачів та ресурсів
     const mappedUsers = Object.entries(participants).map(([id, type]) => ({ 
@@ -86,10 +187,11 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
         };
         const res = await api.post('/meetings/validate-slot', validatePayload);
         setValidationResult(res.data);
+        setValidatedSlot({ start_time: finalStart, end_time: finalEnd });
       } else {
         // payload для find-slots (Сценарії 1, 2, 3)
         const findPayload = {
-          duration_minutes: Number(duration),
+          duration_minutes: durationMinutes,
           search_start: finalStart,
           search_end: finalEnd,
           users: mappedUsers,
@@ -125,12 +227,11 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     <div className="modal-overlay">
       <div className="modal-card modal-card-lg">
         <h2 className="modal-title">Планування зустрічі</h2>
-        
-        <div className="modal-tabs">
-          <button onClick={() => setScenario('1')} className={scenario === '1' ? "tab-button is-active" : "tab-button"}>Сц. 1 (Авто)</button>
-          <button onClick={() => setScenario('2')} className={scenario === '2' ? "tab-button is-active" : "tab-button"}>Сц. 2 (День)</button>
-          <button onClick={() => setScenario('3')} className={scenario === '3' ? "tab-button is-active" : "tab-button"}>Сц. 3 (Діапазон)</button>
-          <button onClick={() => setScenario('4')} className={scenario === '4' ? "tab-button is-active" : "tab-button"}>Сц. 4 (Точний час)</button>
+        <div className="result-box">
+          <strong>Активний сценарій: {scenarioLabel}</strong>
+          <p>
+            Підказка: лише учасники -{'>'} Сц. 1; лише дата -{'>'} Сц. 2; дата + час -{'>'} Сц. 4; діапазон -{'>'} Сц. 3.
+          </p>
         </div>
 
         <form onSubmit={handleAction} className="form-stack">
@@ -154,34 +255,43 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
              </div>
           </div>
 
-          {/* Динамічні поля дат залежно від сценарію */}
-          {scenario !== '1' && (
-            <div className="form-row">
-              <div className="form-field">
-                <label className="form-label">{scenario === '2' ? 'Обрати дату:' : 'Початок пошуку:'}</label>
-                <input type={scenario === '2' ? "date" : "datetime-local"} required value={searchStart} onChange={e => setSearchStart(e.target.value)} className="form-control" />
-              </div>
-              {scenario === '3' && (
-                <div className="form-field">
-                  <label className="form-label">Кінець пошуку:</label>
-                  <input type="datetime-local" required value={searchEnd} onChange={e => setSearchEnd(e.target.value)} className="form-control" />
-                </div>
-              )}
-              {scenario === '4' && (
-                <div className="form-field">
-                  <label className="form-label">Час закінчення:</label>
-                  <input type="datetime-local" required value={searchEnd} onChange={e => setSearchEnd(e.target.value)} className="form-control" />
-                </div>
-              )}
-            </div>
-          )}
-
-          {scenario !== '4' && (
+          <div className="form-row">
             <div className="form-field">
-              <label className="form-label">Тривалість (хв):</label>
-              <input type="number" step="15" value={duration} onChange={e => setDuration(e.target.value)} className="form-control" />
+              <label className="form-label">Бажана дата:</label>
+              <input type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} className="form-control" />
             </div>
-          )}
+            <div className="form-field">
+              <label className="form-label">Час початку:</label>
+              <input type="time" value={meetingStartTime} onChange={e => setMeetingStartTime(e.target.value)} className="form-control" />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">Початок діапазону (дата):</label>
+              <input type="date" value={rangeStartDate} onChange={e => setRangeStartDate(e.target.value)} className="form-control" />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Початок діапазону (час):</label>
+              <input type="time" value={rangeStartTime} onChange={e => setRangeStartTime(e.target.value)} className="form-control" />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">Кінець діапазону (дата):</label>
+              <input type="date" value={rangeEndDate} onChange={e => setRangeEndDate(e.target.value)} className="form-control" />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Кінець діапазону (час):</label>
+              <input type="time" value={rangeEndTime} onChange={e => setRangeEndTime(e.target.value)} className="form-control" />
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Тривалість (хв):</label>
+            <input type="number" step="15" value={duration} onChange={e => setDuration(e.target.value)} className="form-control" />
+          </div>
 
           <div className="list-grid">
             <div className="list-panel">
@@ -216,7 +326,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
 
           <div className="form-actions">
             <button type="submit" disabled={loading} className="btn btn-primary btn-grow">
-              {loading ? 'Аналізуємо розклад...' : (scenario === '4' ? 'Перевірити час' : 'Знайти вільні слоти')}
+              {loading ? 'Аналізуємо розклад...' : (activeScenario === '4' ? 'Перевірити час' : 'Знайти вільні слоти')}
             </button>
             
             <button 
@@ -229,6 +339,8 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
           </div>
         </form>
 
+        {error && <div className="text-danger">{error}</div>}
+
         {/* Результати Сценарію 4 */}
         {validationResult && (
           <div className="result-box">
@@ -240,7 +352,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
                 <ul>{validationResult.conflicts.map((c, i) => <li key={i}>{c}</li>)}</ul>
               </div>
             }
-            <button onClick={() => bookMeeting({start_time: searchStart, end_time: searchEnd})} 
+            <button onClick={() => validatedSlot && bookMeeting(validatedSlot)} 
                     className={validationResult.is_valid ? "btn btn-success btn-block" : "btn btn-warning btn-block"}>
               {validationResult.is_valid ? "Забронювати" : "Забронювати попри конфлікти"}
             </button>
