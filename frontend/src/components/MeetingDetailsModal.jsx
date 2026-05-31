@@ -30,8 +30,14 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
 
     const fetchUsers = async () => {
       try {
-        const res = await api.get('/users/');
-        setAvailableUsers(res.data);
+        const projectId = Number(localMeeting.project_id);
+        if (!projectId || projectId === 1) {
+          const res = await api.get('/users/');
+          setAvailableUsers(res.data);
+        } else {
+          const res = await api.get(`/projects/${projectId}/members`);
+          setAvailableUsers(res.data);
+        }
       } catch (err) {
         setError('Помилка завантаження користувачів');
       }

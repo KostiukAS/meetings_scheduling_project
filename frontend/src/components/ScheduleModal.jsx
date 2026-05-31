@@ -17,6 +17,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   const [rangeEndDate, setRangeEndDate] = useState('');
   const [rangeEndTime, setRangeEndTime] = useState('');
   
+  const [allUsers, setAllUsers] = useState([]);
   const [availableUsers, setAvailableUsers] = useState([]);
   const [availableResources, setAvailableResources] = useState([]);
   const [availableProjects, setAvailableProjects] = useState([]);
@@ -42,6 +43,8 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     setRangeStartTime('');
     setRangeEndDate('');
     setRangeEndTime('');
+    setAllUsers([]);
+    setAvailableUsers([]);
     setParticipants({});
     setResources({});
     setSelectedProject(1);
@@ -93,12 +96,87 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   }, [isOpen]);
 
   const fetchLists = async () => {
-    const [u, r, p] = await Promise.all([
-      api.get('/users/'), api.get('/resources/'), api.get('/projects/')
-    ]);
-    setAvailableUsers(u.data);
-    setAvailableResources(r.data);
-    setAvailableProjects(p.data);
+    try {
+      const [u, r, p] = await Promise.all([
+        api.get('/users/'), api.get('/resources/'), api.get('/projects/')
+      ]);
+      setAllUsers(u.data);
+      setAvailableUsers(u.data);
+      setAvailableResources(r.data);
+      setAvailableProjects(p.data);
+    } catch (err) {
+      setError('Помилка завантаження довідників.');
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!allUsers.length) return;
+
+    const projectId = Number(selectedProject);
+    if (!projectId || projectId === 1) {
+      setAvailableUsers(allUsers);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchProjectMembers = async () => {
+      try {
+        setError('');
+        const res = await api.get(`/projects/${projectId}/members`);
+        if (!cancelled) {
+          setAvailableUsers(res.data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAvailableUsers([]);
+          setError('Помилка завантаження учасників проєкту.');
+        }
+      }
+    };
+
+    fetchProjectMembers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, selectedProject, allUsers]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const allowedIds = new Set(availableUsers.map(u => Number(u.id)));
+
+    setParticipants(prev => {
+      const next = {};
+      Object.entries(prev).forEach(([id, type]) => {
+        const numId = Number(id);
+        const isOrganizer = Number(currentUserId) === numId;
+        if (!type || type === 'none') return;
+        if (isOrganizer || allowedIds.has(numId)) {
+          next[numId] = type;
+        }
+      });
+
+      if (currentUserId) {
+        next[currentUserId] = 'required';
+      }
+
+      return next;
+    });
+  }, [availableUsers, currentUserId, isOpen]);
+
+  const buildParticipantsPayload = () => {
+    const allowedIds = new Set(availableUsers.map(u => Number(u.id)));
+    return Object.entries(participants)
+      .filter(([id, type]) => {
+        const numId = Number(id);
+        const isOrganizer = Number(currentUserId) === numId;
+        return type && type !== 'none' && (isOrganizer || allowedIds.has(numId));
+      })
+      .map(([id, type]) => ({
+        id: Number(id),
+        weight: type === 'required' ? 1000000 : 10
+      }));
   };
 
   const handleAction = async (e) => {
@@ -169,9 +247,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     const finalEnd = endDate.toISOString();
 
     // Спільні масиви користувачів та ресурсів
-    const mappedUsers = Object.entries(participants).map(([id, type]) => ({ 
-      id: Number(id), weight: type === 'required' ? 1000000 : 10 
-    }));
+    const mappedUsers = buildParticipantsPayload();
     const mappedResources = Object.entries(resources).map(([id, type]) => ({ 
       id: Number(id), weight: type === 'required' ? 1000000 : 10 
     }));
@@ -213,7 +289,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
       const payload = {
         title, description, project_id: selectedProject, frequency,
         start_time: slot.start_time, end_time: slot.end_time,
-        participants: Object.entries(participants).map(([id, type]) => ({ id: Number(id), weight: type === 'required' ? 1000000 : 10 })),
+        participants: buildParticipantsPayload(),
         resources: Object.entries(resources).map(([id, type]) => ({ id: Number(id), weight: type === 'required' ? 1000000 : 10 }))
       };
       await api.post('/meetings/', payload);
@@ -300,7 +376,21 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
                 <div key={u.id} className="list-item">
                   <span>{u.full_name || u.email}</span>
                   {u.id === currentUserId ? <span className="badge-success">Орг.</span> : 
-                    <select onChange={e => setParticipants({...participants, [u.id]: e.target.value})} className="mini-select">
+                    <select
+                      onChange={e => {
+                        const value = e.target.value;
+                        setParticipants(prev => {
+                          const next = { ...prev };
+                          if (value === 'none') {
+                            delete next[u.id];
+                          } else {
+                            next[u.id] = value;
+                          }
+                          return next;
+                        });
+                      }}
+                      className="mini-select"
+                    >
                       <option value="none">-</option>
                       <option value="required">Обов.</option>
                       <option value="optional">Опц.</option>

@@ -70,7 +70,8 @@ const Dashboard = () => {
             frequency: meeting.frequency,
             description: meeting.description,
             participants: meeting.participants,
-            resources: meeting.resources
+            resources: meeting.resources,
+            project_id: meeting.project_id
           }
         };
 
@@ -141,7 +142,8 @@ const Dashboard = () => {
       frequency: clickInfo.event.extendedProps.frequency,
       description: clickInfo.event.extendedProps.description,
       participants: clickInfo.event.extendedProps.participants,
-      resources: clickInfo.event.extendedProps.resources
+      resources: clickInfo.event.extendedProps.resources,
+      project_id: clickInfo.event.extendedProps.project_id
     });
     setIsDetailsModalOpen(true);
   };

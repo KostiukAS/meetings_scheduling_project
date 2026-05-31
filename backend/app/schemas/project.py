@@ -18,3 +18,6 @@ class ProjectResponse(ProjectBase):
     model_config = {
         "from_attributes": True
     }
+
+class ProjectMemberAdd(BaseModel):
+    user_id: int
