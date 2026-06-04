@@ -57,9 +57,20 @@ const Dashboard = () => {
       const response = await api.get('/meetings/');
       const formattedEvents = [];
 
+      const formatLocalDate = (value) => {
+        const date = new Date(value);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
       response.data.forEach(meeting => {
         const startLocal = meeting.start_time;
         const endLocal = meeting.end_time;
+        const endRecur = meeting.period_stop_time
+          ? formatLocalDate(meeting.period_stop_time)
+          : undefined;
         
         const baseEvent = {
           id: meeting.id,
@@ -71,7 +82,8 @@ const Dashboard = () => {
             description: meeting.description,
             participants: meeting.participants,
             resources: meeting.resources,
-            project_id: meeting.project_id
+            project_id: meeting.project_id,
+            period_stop_time: meeting.period_stop_time
           }
         };
 
@@ -87,6 +99,7 @@ const Dashboard = () => {
             startTime: new Date(startLocal).toLocaleTimeString('en-GB', { hour12: false }),
             endTime: new Date(endLocal).toLocaleTimeString('en-GB', { hour12: false }),
             startRecur: startLocal, // Починати відображати з дати створення
+            endRecur,
             daysOfWeek: [1, 2, 3, 4, 5]
           });
         } else if (meeting.frequency === 'weekly') {
@@ -96,6 +109,7 @@ const Dashboard = () => {
             startTime: new Date(startLocal).toLocaleTimeString('en-GB', { hour12: false }),
             endTime: new Date(endLocal).toLocaleTimeString('en-GB', { hour12: false }),
             startRecur: startLocal,
+            endRecur,
             daysOfWeek: [dayNum]
           });
         }
@@ -143,7 +157,8 @@ const Dashboard = () => {
       description: clickInfo.event.extendedProps.description,
       participants: clickInfo.event.extendedProps.participants,
       resources: clickInfo.event.extendedProps.resources,
-      project_id: clickInfo.event.extendedProps.project_id
+      project_id: clickInfo.event.extendedProps.project_id,
+      period_stop_time: clickInfo.event.extendedProps.period_stop_time
     });
     setIsDetailsModalOpen(true);
   };

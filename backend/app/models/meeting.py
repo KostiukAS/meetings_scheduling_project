@@ -44,6 +44,7 @@ class Meeting(Base):
     frequency: Mapped[str] = mapped_column(String(50), nullable=True)
     start_time: Mapped[datetime] = mapped_column(DateTime)
     end_time: Mapped[datetime] = mapped_column(DateTime)
+    period_stop_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     participants: Mapped[List["MeetingParticipant"]] = relationship(
         "MeetingParticipant", 

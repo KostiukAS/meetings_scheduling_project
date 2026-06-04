@@ -1,11 +1,11 @@
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone, time, date
 from zoneinfo import ZoneInfo
-from app.schemas.meeting import FindSlotsRequest, SlotResponse, MeetingCreate, ValidateSlotRequest, ValidateSlotResponse, ParticipantItem
+from app.schemas.meeting import FindSlotsRequest, SlotResponse, SlotSubResponse, MeetingCreate, ValidateSlotRequest, ValidateSlotResponse, ParticipantItem
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.resource import MeetingResource, Resource
 from app.models.user import Schedule, User
-from app.algorithm.scheduler import find_best_meeting_slots
+from app.algorithm.scheduler import find_best_meeting_slots, W_MAND
 from app.core.config import settings
 
 QUANT_MINUTES = 15
@@ -48,7 +48,7 @@ def ceil_to_quantum(dt: datetime) -> datetime:
         return floored + timedelta(minutes=QUANT_MINUTES)
     return floored
 
-def project_recurring_busy(busy_list, start_time, end_time, frequency, search_start, search_end, base_dt, resource_prefix, res_id):
+def project_recurring_busy(busy_list, start_time, end_time, frequency, search_start, search_end, base_dt, resource_prefix, res_id, stop_time=None):
     meeting_duration = end_time - start_time
     current_occurrence_start = start_time
     
@@ -61,7 +61,16 @@ def project_recurring_busy(busy_list, start_time, end_time, frequency, search_st
     if not step:
         return
 
-    while current_occurrence_start < search_end:
+    if stop_time and stop_time <= start_time:
+        return
+
+    effective_end = search_end
+    if stop_time:
+        if stop_time <= search_start:
+            return
+        effective_end = min(search_end, stop_time)
+
+    while current_occurrence_start < effective_end:
         current_occurrence_end = current_occurrence_start + meeting_duration
         
         if current_occurrence_end > search_start:
@@ -160,6 +169,7 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                                 "end_quantum": dt_to_quant(m_end_local, base_dt)
                             })
                     else:
+                        stop_time_local = utc_db_dt_to_local(m.period_stop_time) if m.period_stop_time else None
                         project_recurring_busy(
                             busy,
                             m_start_local,
@@ -169,7 +179,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             search_end,
                             base_dt,
                             "u",
-                            mp.user_id
+                            mp.user_id,
+                            stop_time_local
                         )
 
     if resource_ids:
@@ -191,6 +202,7 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                                 "end_quantum": dt_to_quant(m_end_local, base_dt)
                             })
                     else:
+                        stop_time_local = utc_db_dt_to_local(m.period_stop_time) if m.period_stop_time else None
                         project_recurring_busy(
                             busy,
                             m_start_local,
@@ -200,7 +212,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             search_end,
                             base_dt,
                             "r",
-                            mr.resource_id
+                            mr.resource_id,
+                            stop_time_local
                         )
         
     best_quanta_slots = find_best_meeting_slots(
@@ -211,20 +224,26 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
         busy=busy
     )
     
+    def build_slot_payload(slot_dict):
+        start_dt = quant_to_dt(slot_dict["start_time"], base_dt)
+        end_dt = quant_to_dt(slot_dict["end_time"] + 1, base_dt)
+
+        return {
+            "start_time": request_dt_to_utc(start_dt),
+            "end_time": request_dt_to_utc(end_dt),
+            "score": slot_dict["score"]
+        }
+
     result = []
     for slot in best_quanta_slots:
-        start_dt = quant_to_dt(slot["start_time"], base_dt)
-        end_dt = quant_to_dt(slot["end_time"] + 1, base_dt) 
+        slot_payload = build_slot_payload(slot)
+        subslots_payload = [build_slot_payload(sub) for sub in slot.get("subslots", [])]
 
-        start_utc = request_dt_to_utc(start_dt)
-        end_utc = request_dt_to_utc(end_dt)
-        
         result.append(SlotResponse(
-            start_time=start_utc,
-            end_time=end_utc,
-            score=slot["score"]
+            **slot_payload,
+            subslots=[SlotSubResponse(**sub) for sub in subslots_payload]
         ))
-        
+
     return result
 
 def create_meeting(db: Session, meeting_data: MeetingCreate, current_user_id: int):
@@ -305,6 +324,7 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
 
     conflicts = []
     score = 0
+    has_critical_conflict = False
 
     # 1. Графіки
     schedules = db.query(Schedule).filter(Schedule.user_id.in_(user_ids)).all()
@@ -321,12 +341,16 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
             if not s or s.is_day_off:
                 conflicts.append(f"У {name} вихідний")
                 score += u.weight
+                if u.weight >= W_MAND:
+                    has_critical_conflict = True
             else:
                 work_start = utc_time_to_local_datetime(current_date, s.start_time)
                 work_end = utc_time_to_local_datetime(current_date, s.end_time)
                 if start_dt < work_start or end_dt > work_end:
                     conflicts.append(f"Час поза межами робочого дня {name}")
                     score += u.weight
+                    if u.weight >= W_MAND:
+                        has_critical_conflict = True
         current_date += timedelta(days=1)
 
     # 2. Зустрічі Користувачів
@@ -336,12 +360,18 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
         Meeting.end_time > start_dt_utc
     ).all()
 
+    if request.meeting_id:
+        user_meetings = [m for m in user_meetings if m.id != request.meeting_id]
+
     for m in user_meetings:
         for mp in m.participants:
             if mp.user_id in user_ids and mp.status != "Rejected":
                 name = user_names.get(mp.id, f"ID {mp.user_id}")
                 conflicts.append(f"{name} вже має зустріч: '{m.title}'")
-                score += next((u.weight for u in request.users if u.id == mp.user_id), 10)
+                weight = next((u.weight for u in request.users if u.id == mp.user_id), 10)
+                score += weight
+                if weight >= W_MAND:
+                    has_critical_conflict = True
 
     # 3. Ресурси (Кімнати)
     res_meetings = db.query(Meeting).join(MeetingResource).filter(
@@ -350,15 +380,21 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
         Meeting.end_time > start_dt_utc
     ).all()
 
+    if request.meeting_id:
+        res_meetings = [m for m in res_meetings if m.id != request.meeting_id]
+
     for m in res_meetings:
         for mr in m.resources:
             if mr.resource_id in resource_ids:
                 name = res_names.get(mr.resource_id, f"Кімната {mr.resource_id}")
                 conflicts.append(f"Кімната '{name}' зайнята: '{m.title}'")
-                score += next((r.weight for r in request.resources if r.id == mr.resource_id), 10)
+                weight = next((r.weight for r in request.resources if r.id == mr.resource_id), 10)
+                score += weight
+                if weight >= W_MAND:
+                    has_critical_conflict = True
 
     return ValidateSlotResponse(
-        is_valid=len(list(set(conflicts))) == 0,
+        is_valid=(not has_critical_conflict) if request.soft_validation else len(list(set(conflicts))) == 0,
         score=score,
         conflicts=list(set(conflicts))
     )

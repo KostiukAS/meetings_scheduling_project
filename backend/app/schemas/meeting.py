@@ -12,6 +12,7 @@ class ParticipantDetail(BaseModel):
     full_name: Optional[str] = None
     email: str
     status: str
+    weight: int
     
     model_config = {
         "from_attributes": True
@@ -20,6 +21,7 @@ class ParticipantDetail(BaseModel):
 class ResourceDetail(BaseModel):
     id: int
     name: str
+    weight: int
     
     model_config = {
         "from_attributes": True
@@ -34,7 +36,7 @@ class FindSlotsRequest(BaseModel):
     resources: List[ParticipantItem] # Список ID ресурсів
 
 # Знайдений часовий слот
-class SlotResponse(BaseModel):
+class SlotBase(BaseModel):
     start_time: datetime
     end_time: datetime
     score: int
@@ -44,6 +46,12 @@ class SlotResponse(BaseModel):
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
+
+class SlotSubResponse(SlotBase):
+    pass
+
+class SlotResponse(SlotBase):
+    subslots: List[SlotSubResponse] = []
 
 class MeetingBase(BaseModel):
     title: str
@@ -66,6 +74,7 @@ class MeetingResponse(BaseModel):
     organizer_id: int
     start_time: datetime
     end_time: datetime
+    period_stop_time: Optional[datetime] = None
     frequency: Optional[str] = None
     project_id: Optional[int] = None
     participants: List[ParticipantDetail] = []
@@ -75,8 +84,10 @@ class MeetingResponse(BaseModel):
         "from_attributes": True
     }
 
-    @field_serializer("start_time", "end_time")
-    def serialize_meeting_dt(self, dt: datetime):
+    @field_serializer("start_time", "end_time", "period_stop_time")
+    def serialize_meeting_dt(self, dt: Optional[datetime]):
+        if dt is None:
+            return None
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
@@ -88,6 +99,10 @@ class AddParticipantRequest(BaseModel):
     user_id: int
     weight: int
 
+class AddResourceRequest(BaseModel):
+    resource_id: int
+    weight: int
+
 class MeetingUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -95,9 +110,14 @@ class MeetingUpdate(BaseModel):
     end_time: Optional[datetime] = None
     frequency: Optional[str] = None
 
+class StopRecurringRequest(BaseModel):
+    stop_time: datetime
+
 class ValidateSlotRequest(BaseModel):
     start_time: datetime
     end_time: datetime
+    meeting_id: Optional[int] = None
+    soft_validation: Optional[bool] = False
     users: List[ParticipantItem] = []
     resources: List[ParticipantItem] = []
 

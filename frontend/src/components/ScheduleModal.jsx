@@ -25,6 +25,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   const [participants, setParticipants] = useState({});
   const [resources, setResources] = useState({});
   const [selectedProject, setSelectedProject] = useState(1);
+  const [allowExternalUsers, setAllowExternalUsers] = useState(false);
 
   const [slots, setSlots] = useState([]);
   const [validationResult, setValidationResult] = useState(null);
@@ -48,6 +49,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     setParticipants({});
     setResources({});
     setSelectedProject(1);
+    setAllowExternalUsers(false);
     setSlots([]);
     setValidationResult(null);
     setValidatedSlot(null);
@@ -64,12 +66,6 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   };
 
   const activeScenario = getActiveScenario();
-  const scenarioLabel = {
-    1: 'Сц. 1 (Авто)',
-    2: 'Сц. 2 (День)',
-    3: 'Сц. 3 (Діапазон)',
-    4: 'Сц. 4 (Точний час)'
-  }[activeScenario];
 
   useEffect(() => {
     if (isOpen) {
@@ -114,6 +110,10 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     if (!allUsers.length) return;
 
     const projectId = Number(selectedProject);
+    if (allowExternalUsers) {
+      setAvailableUsers(allUsers);
+      return;
+    }
     if (!projectId || projectId === 1) {
       setAvailableUsers(allUsers);
       return;
@@ -140,7 +140,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, selectedProject, allUsers]);
+  }, [isOpen, selectedProject, allUsers, allowExternalUsers]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -177,6 +177,15 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
         id: Number(id),
         weight: type === 'required' ? 1000000 : 10
       }));
+  };
+
+  const formatSlotRange = (slot) => {
+    const start = new Date(slot.start_time);
+    const end = new Date(slot.end_time);
+    const startText = start.toLocaleString('uk-UA');
+    const sameDay = start.toDateString() === end.toDateString();
+    const endText = sameDay ? end.toLocaleTimeString('uk-UA') : end.toLocaleString('uk-UA');
+    return `${startText} - ${endText}`;
   };
 
   const handleAction = async (e) => {
@@ -303,12 +312,6 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     <div className="modal-overlay">
       <div className="modal-card modal-card-lg">
         <h2 className="modal-title">Планування зустрічі</h2>
-        <div className="result-box">
-          <strong>Активний сценарій: {scenarioLabel}</strong>
-          <p>
-            Підказка: лише учасники -{'>'} Сц. 1; лише дата -{'>'} Сц. 2; дата + час -{'>'} Сц. 4; діапазон -{'>'} Сц. 3.
-          </p>
-        </div>
 
         <form onSubmit={handleAction} className="form-stack">
           <input type="text" placeholder="Назва" required value={title} onChange={e => setTitle(e.target.value)} className="form-control" />
@@ -329,6 +332,20 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
                   <option value="weekly">Щотижня</option>
                 </select>
              </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">
+                <input
+                  type="checkbox"
+                  checked={allowExternalUsers}
+                  onChange={e => setAllowExternalUsers(e.target.checked)}
+                />
+                {' '}
+                Дозволити учасників поза проєктом
+              </label>
+            </div>
           </div>
 
           <div className="form-row">
@@ -403,7 +420,9 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
               <strong>Ресурси/Кімнати:</strong>
               {availableResources.map(r => (
                 <div key={r.id} className="list-item">
-                  <span>{r.name}</span>
+                  <span>
+                    {r.capacity != null && r.capacity > 0 ? `${r.name} (місткість: ${r.capacity})` : r.name}
+                  </span>
                   <select onChange={e => setResources({...resources, [r.id]: e.target.value})} className="mini-select">
                     <option value="none">-</option>
                     <option value="required">Обов.</option>
@@ -435,6 +454,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
         {validationResult && (
           <div className="result-box">
             <h4>Результат валідації:</h4>
+            {validatedSlot && <p>Час: {formatSlotRange(validatedSlot)}</p>}
             {validationResult.is_valid ? 
               <p className="text-success">✅ Час вільний! Штраф: {validationResult.score}</p> :
               <div className="text-danger">
@@ -454,10 +474,25 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
           <div className="result-box">
             <h4>Рекомендовані слоти:</h4>
             {slots.map((s, i) => (
-              <div key={i} className="slot-item">
-                <span>{new Date(s.start_time).toLocaleString('uk-UA')}</span>
-                <button onClick={() => bookMeeting(s)} className="btn btn-success btn-sm">Обрати</button>
-              </div>
+              <React.Fragment key={i}>
+                <div className="slot-item">
+                  <span>{formatSlotRange(s)} (штраф: {s.score})</span>
+                  <button onClick={() => bookMeeting(s)} className="btn btn-success btn-sm">Обрати</button>
+                </div>
+                {Array.isArray(s.subslots) && s.subslots.length > 0 && (
+                  <details className="slot-subslots">
+                    <summary>Альтернативні слоти ({s.subslots.length})</summary>
+                    <div className="subslot-list">
+                      {s.subslots.map((sub, subIndex) => (
+                        <div key={`${i}-sub-${subIndex}`} className="subslot-item">
+                          <span>{formatSlotRange(sub)} (штраф: {sub.score})</span>
+                          <button onClick={() => bookMeeting(sub)} className="btn btn-success btn-sm">Обрати</button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </React.Fragment>
             ))}
           </div>
         )}

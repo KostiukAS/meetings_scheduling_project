@@ -6,9 +6,11 @@ from app.db.database import get_db
 from app.api.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.meeting import (FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse, 
-                                 ParticipantStatusUpdate, AddParticipantRequest, MeetingUpdate, 
-                                 ValidateSlotRequest, ValidateSlotResponse)
+                                 ParticipantStatusUpdate, AddParticipantRequest, AddResourceRequest,
+                                 MeetingUpdate, ValidateSlotRequest, ValidateSlotResponse,
+                                 StopRecurringRequest)
 from app.models.meeting import Meeting, MeetingParticipant
+from app.models.resource import MeetingResource, Resource
 from app.services import meet_service
 
 router = APIRouter(
@@ -192,6 +194,37 @@ def update_meeting(
     db.refresh(meeting)
     return meeting
 
+@router.patch("/{meeting_id}/stop", response_model=MeetingResponse)
+def stop_recurring_meeting(
+    meeting_id: int,
+    stop_request: StopRecurringRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Зупинити повторювану зустріч з обраного часу (виключно)."""
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+
+    if meeting.organizer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Тільки організатор може зупиняти повторення")
+
+    if not meeting.frequency or meeting.frequency == "once":
+        raise HTTPException(status_code=400, detail="Зустріч не є періодичною")
+
+    if meeting.period_stop_time is not None:
+        raise HTTPException(status_code=400, detail="Повторення вже зупинено")
+
+    stop_time_utc = meet_service.request_dt_to_utc(stop_request.stop_time)
+
+    if stop_time_utc < meeting.start_time:
+        raise HTTPException(status_code=400, detail="Час зупинки не може бути раніше старту")
+
+    meeting.period_stop_time = stop_time_utc
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_meeting(
     meeting_id: int,
@@ -239,3 +272,65 @@ def remove_participant_from_meeting(
     db.delete(participant)
     db.commit()
     return {"detail": "Учасника успішно видалено"}
+
+@router.post("/{meeting_id}/resources", status_code=status.HTTP_201_CREATED)
+def add_resource_to_meeting(
+    meeting_id: int,
+    resource: AddResourceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Додати новий ресурс до існуючої зустрічі"""
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+
+    if meeting.organizer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Тільки організатор може додавати ресурси")
+
+    existing = db.query(MeetingResource).filter(
+        MeetingResource.meeting_id == meeting_id,
+        MeetingResource.resource_id == resource.resource_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Ресурс вже додано")
+
+    db_resource = db.query(Resource).filter(Resource.id == resource.resource_id).first()
+    if not db_resource:
+        raise HTTPException(status_code=404, detail="Ресурс не знайдено")
+
+    new_resource = MeetingResource(
+        meeting_id=meeting_id,
+        resource_id=resource.resource_id,
+        weight=resource.weight
+    )
+    db.add(new_resource)
+    db.commit()
+    return {"message": "Ресурс успішно додано"}
+
+@router.delete("/{meeting_id}/resources/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_resource_from_meeting(
+    meeting_id: int,
+    resource_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Видалення ресурсу із зустрічі."""
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Зустріч не знайдено")
+
+    if meeting.organizer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Тільки організатор може видаляти ресурси")
+
+    resource_link = db.query(MeetingResource).filter(
+        MeetingResource.meeting_id == meeting_id,
+        MeetingResource.resource_id == resource_id
+    ).first()
+
+    if not resource_link:
+        raise HTTPException(status_code=404, detail="Ресурс не знайдено у цій зустрічі")
+
+    db.delete(resource_link)
+    db.commit()
+    return {"detail": "Ресурс успішно видалено"}
