@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Admin from './pages/Admin';
 
 // Компонент-обгортка для захисту маршрутів
 const ProtectedRoute = ({ children }) => {
@@ -29,6 +30,15 @@ function App() {
               <Dashboard />
             </ProtectedRoute>
           } 
+        />
+
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <Admin />
+            </ProtectedRoute>
+          }
         />
       </Routes>
     </BrowserRouter>

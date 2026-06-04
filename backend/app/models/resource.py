@@ -15,6 +15,15 @@ class MeetingResource(Base):
     weight: Mapped[int] = mapped_column(Integer)
 
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="resources")
+    resource: Mapped["Resource"] = relationship("Resource")
+
+    @property
+    def id(self) -> int:
+        return self.resource_id
+
+    @property
+    def name(self) -> str:
+        return self.resource.name if self.resource else ""
 
 class Resource(Base):
     __tablename__ = "resources"

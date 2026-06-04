@@ -181,3 +181,6 @@ cython_debug/
 .cursorindexingignore
 
 node_modules/
+
+user_data.txt
+description.txt

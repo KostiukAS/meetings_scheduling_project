@@ -30,3 +30,7 @@ def authenticate_user(db: Session, email: str, password: str):
     if not verify_password(password, user.password_hash):
         return None
     return user
+
+def get_all_users(db: Session, skip: int = 0, limit: int = 100):
+    """Повертає список усіх користувачів системи."""
+    return db.query(User).offset(skip).limit(limit).all()

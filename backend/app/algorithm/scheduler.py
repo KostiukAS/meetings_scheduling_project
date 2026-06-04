@@ -19,34 +19,43 @@ def build_availability_matrix(r_m: List[Dict[str, Any]], busy: List[Dict[str, in
             # Визначаємо межі перетину існуючої зустрічі з нашим діапазоном пошуку
             s = max(t_start, event["start_quantum"])
             e = min(t_end, event["end_quantum"])
-            for t in range(s, e + 1):
+            for t in range(s, e):
                 b_matrix[r_id][t] = 1
                 
     return b_matrix
 
-def filter_similar_proposals(valid_slots: List[Dict[str, int]]) -> List[Dict[str, int]]:
+def group_similar_proposals(valid_slots: List[Dict[str, int]]) -> List[Dict[str, int]]:
     """
-    5. Забезпечення різноманіття пропозицій (Diversity Filter).
-    Фільтрує слоти, що перетинаються між собою і мають однаковий бал штрафу.
+    5. Групування пропозицій з однаковим штрафом, що перетинаються.
+    Повертає основні слоти з переліком підслотів.
     """
-    final_slots = []
-    
+    grouped_slots = []
+
     for current_slot in valid_slots:
-        is_overlapping = False
-        
-        for accepted_slot in final_slots:
+        assigned = False
+
+        for accepted_slot in grouped_slots:
             overlap_start = max(current_slot["start_time"], accepted_slot["start_time"])
             overlap_end = min(current_slot["end_time"], accepted_slot["end_time"])
-            
-            if overlap_start <= overlap_end:
-                if current_slot["score"] == accepted_slot["score"]:
-                    is_overlapping = True
-                    break
-                    
-        if not is_overlapping:
-            final_slots.append(current_slot)
-            
-    return final_slots
+
+            if overlap_start <= overlap_end and current_slot["score"] == accepted_slot["score"]:
+                accepted_slot["subslots"].append({
+                    "start_time": current_slot["start_time"],
+                    "end_time": current_slot["end_time"],
+                    "score": current_slot["score"]
+                })
+                assigned = True
+                break
+
+        if not assigned:
+            grouped_slots.append({
+                "start_time": current_slot["start_time"],
+                "end_time": current_slot["end_time"],
+                "score": current_slot["score"],
+                "subslots": []
+            })
+
+    return grouped_slots
 
 def find_best_meeting_slots(d: int, t_start: int, t_end: int, r_m: List[Dict[str, Any]], busy: List[Dict[str, int]]) -> List[Dict[str, int]]:
     """
@@ -104,8 +113,8 @@ def find_best_meeting_slots(d: int, t_start: int, t_end: int, r_m: List[Dict[str
     # Сортування від найменшого штрафу до найбільшого
     valid_slots.sort(key=lambda x: x["score"])
     
-    # 5. Забезпечення різноманіття пропозицій
-    final_slots = filter_similar_proposals(valid_slots)
-    
-    # Повертаємо перші 5 найкращих слотів
-    return final_slots[:5]
+    # 5. Групування перетинів з однаковим штрафом
+    grouped_slots = group_similar_proposals(valid_slots)
+
+    # Повертаємо перші 5 найкращих слотів (підслоти не рахуються)
+    return grouped_slots[:5]

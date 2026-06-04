@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str
     POSTGRES_PORT: str
     SECRET_KEY: str
+    APP_TIMEZONE: str = "Europe/Kyiv"
 
     @property
     def database_url(self) -> str:
