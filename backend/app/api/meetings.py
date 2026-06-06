@@ -7,7 +7,7 @@ from app.api.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.meeting import (FindSlotsRequest, SlotResponse, MeetingCreate, MeetingResponse, 
                                  ParticipantStatusUpdate, AddParticipantRequest, AddResourceRequest,
-                                 MeetingUpdate, ValidateSlotRequest, ValidateSlotResponse,
+                                 MeetingUpdate, ParticipantItem, ValidateSlotRequest, ValidateSlotResponse,
                                  StopRecurringRequest)
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.resource import MeetingResource, Resource
@@ -17,6 +17,41 @@ router = APIRouter(
     prefix="/meetings",
     tags=["Meetings"]
 )
+
+
+def _ensure_positive_time_range(start_time, end_time):
+    if start_time >= end_time:
+        raise HTTPException(
+            status_code=400,
+            detail="Час початку зустрічі має бути раніше за час кінця."
+        )
+
+
+def _ensure_slot_is_bookable(
+    db: Session,
+    *,
+    start_time,
+    end_time,
+    users: list[ParticipantItem],
+    resources: list[ParticipantItem],
+    meeting_id: int | None = None,
+):
+    validation = meet_service.validate_meeting_slot(
+        db,
+        ValidateSlotRequest(
+            start_time=start_time,
+            end_time=end_time,
+            meeting_id=meeting_id,
+            soft_validation=True,
+            users=users,
+            resources=resources,
+        )
+    )
+    if not validation.is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Обраний слот має критичний конфлікт і недоступний для бронювання."
+        )
 
 @router.post("/find-slots", response_model=List[SlotResponse])
 def find_slots(
@@ -28,6 +63,12 @@ def find_slots(
     Приймає параметри нової зустрічі, запускає алгоритм ковзного вікна 
     і повертає ТОП-5 найкращих часових слотів.
     """
+    if request.duration_minutes <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Тривалість зустрічі має бути більшою за 0 хвилин."
+        )
+
     if request.duration_minutes % 15 != 0:
         raise HTTPException(
             status_code=400, 
@@ -59,12 +100,17 @@ def create_new_meeting(
     """
     Створює нову зустріч.
     """
-    # Перевірка базової логіки: час кінця має бути після часу початку
-    if meeting_in.start_time >= meeting_in.end_time:
-        raise HTTPException(
-            status_code=400, 
-            detail="Час початку зустрічі має бути раніше за час кінця."
-        )
+    participants_for_validation = {participant.id: participant for participant in meeting_in.participants}
+    participants_for_validation[current_user.id] = ParticipantItem(id=current_user.id, weight=1_000_000)
+
+    _ensure_positive_time_range(meeting_in.start_time, meeting_in.end_time)
+    _ensure_slot_is_bookable(
+        db,
+        start_time=meeting_in.start_time,
+        end_time=meeting_in.end_time,
+        users=list(participants_for_validation.values()),
+        resources=meeting_in.resources,
+    )
         
     return meet_service.create_meeting(db, meeting_data=meeting_in, current_user_id=current_user.id)
 
@@ -85,6 +131,7 @@ def validate_slot_endpoint(
     current_user: User = Depends(get_current_user)
 ):
     """Валідація конкретного вікна на наявність конфліктів."""
+    _ensure_positive_time_range(request.start_time, request.end_time)
     from app.services.meet_service import validate_meeting_slot
     return validate_meeting_slot(db, request)
 
@@ -115,6 +162,19 @@ def add_participant_to_meeting(
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Користувач вже є учасником")
+
+    participant_items = [ParticipantItem(id=mp.user_id, weight=mp.weight) for mp in meeting.participants]
+    participant_items.append(ParticipantItem(id=participant.user_id, weight=participant.weight))
+    resource_items = [ParticipantItem(id=mr.resource_id, weight=mr.weight) for mr in meeting.resources]
+
+    _ensure_slot_is_bookable(
+        db,
+        start_time=meeting.start_time,
+        end_time=meeting.end_time,
+        users=participant_items,
+        resources=resource_items,
+        meeting_id=meeting.id,
+    )
 
     # 3. Додаємо запис у таблицю зв'язку
     new_participant = MeetingParticipant(
@@ -186,6 +246,21 @@ def update_meeting(
         update_data["start_time"] = meet_service.request_dt_to_utc(update_data["start_time"])
     if "end_time" in update_data and update_data["end_time"]:
         update_data["end_time"] = meet_service.request_dt_to_utc(update_data["end_time"])
+
+    next_start_time = update_data.get("start_time", meeting.start_time)
+    next_end_time = update_data.get("end_time", meeting.end_time)
+    _ensure_positive_time_range(next_start_time, next_end_time)
+
+    participant_items = [ParticipantItem(id=mp.user_id, weight=mp.weight) for mp in meeting.participants]
+    resource_items = [ParticipantItem(id=mr.resource_id, weight=mr.weight) for mr in meeting.resources]
+    _ensure_slot_is_bookable(
+        db,
+        start_time=next_start_time,
+        end_time=next_end_time,
+        users=participant_items,
+        resources=resource_items,
+        meeting_id=meeting.id,
+    )
 
     for key, value in update_data.items():
         setattr(meeting, key, value)
@@ -298,6 +373,19 @@ def add_resource_to_meeting(
     db_resource = db.query(Resource).filter(Resource.id == resource.resource_id).first()
     if not db_resource:
         raise HTTPException(status_code=404, detail="Ресурс не знайдено")
+
+    participant_items = [ParticipantItem(id=mp.user_id, weight=mp.weight) for mp in meeting.participants]
+    resource_items = [ParticipantItem(id=mr.resource_id, weight=mr.weight) for mr in meeting.resources]
+    resource_items.append(ParticipantItem(id=resource.resource_id, weight=resource.weight))
+
+    _ensure_slot_is_bookable(
+        db,
+        start_time=meeting.start_time,
+        end_time=meeting.end_time,
+        users=participant_items,
+        resources=resource_items,
+        meeting_id=meeting.id,
+    )
 
     new_resource = MeetingResource(
         meeting_id=meeting_id,

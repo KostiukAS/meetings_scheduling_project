@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
 from datetime import datetime, timedelta, timezone, time, date
 from zoneinfo import ZoneInfo
 from app.schemas.meeting import FindSlotsRequest, SlotResponse, SlotSubResponse, MeetingCreate, ValidateSlotRequest, ValidateSlotResponse, ParticipantItem
@@ -10,6 +11,23 @@ from app.core.config import settings
 
 QUANT_MINUTES = 15
 APP_TZ = ZoneInfo(settings.APP_TIMEZONE)
+
+def get_recurrence_step(frequency: str) -> timedelta | None:
+    if frequency == "daily":
+        return timedelta(days=1)
+    if frequency == "weekly":
+        return timedelta(weeks=1)
+    return None
+
+def first_occurrence_on_or_after(start_time: datetime, target: datetime, step: timedelta) -> datetime:
+    if target <= start_time:
+        return start_time
+    delta = target - start_time
+    steps = int(delta.total_seconds() // step.total_seconds())
+    current = start_time + (step * steps)
+    if current < target:
+        current += step
+    return current
 
 def request_dt_to_local(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -48,15 +66,10 @@ def ceil_to_quantum(dt: datetime) -> datetime:
         return floored + timedelta(minutes=QUANT_MINUTES)
     return floored
 
-def project_recurring_busy(busy_list, start_time, end_time, frequency, search_start, search_end, base_dt, resource_prefix, res_id, stop_time=None):
+def project_recurring_busy(busy_list, start_time, end_time, frequency, search_start, search_end, base_dt, resource_prefix, res_id, weight, stop_time=None):
     meeting_duration = end_time - start_time
-    current_occurrence_start = start_time
     
-    step = None
-    if frequency == "daily":
-        step = timedelta(days=1)
-    elif frequency == "weekly":
-        step = timedelta(weeks=1)
+    step = get_recurrence_step(frequency)
     
     if not step:
         return
@@ -64,11 +77,9 @@ def project_recurring_busy(busy_list, start_time, end_time, frequency, search_st
     if stop_time and stop_time <= start_time:
         return
 
-    effective_end = search_end
-    if stop_time:
-        if stop_time <= search_start:
-            return
-        effective_end = min(search_end, stop_time)
+    effective_end = min(search_end, stop_time) if stop_time else search_end
+    window_start = search_start - meeting_duration
+    current_occurrence_start = first_occurrence_on_or_after(start_time, window_start, step)
 
     while current_occurrence_start < effective_end:
         current_occurrence_end = current_occurrence_start + meeting_duration
@@ -77,10 +88,73 @@ def project_recurring_busy(busy_list, start_time, end_time, frequency, search_st
             busy_list.append({
                 "resource_id": f"{resource_prefix}_{res_id}",
                 "start_quantum": max(0, dt_to_quant(current_occurrence_start, base_dt)),
-                "end_quantum": dt_to_quant(current_occurrence_end, base_dt)
+                "end_quantum": dt_to_quant(current_occurrence_end, base_dt),
+                "weight": weight,
             })
         
         current_occurrence_start += step
+
+def recurring_overlaps_range(range_start: datetime, range_end: datetime, start_time: datetime, end_time: datetime, frequency: str, stop_time: datetime | None) -> bool:
+    step = get_recurrence_step(frequency)
+    if not step:
+        return False
+
+    if stop_time and stop_time <= start_time:
+        return False
+
+    meeting_duration = end_time - start_time
+    window_start = range_start - meeting_duration
+    current_occurrence_start = first_occurrence_on_or_after(start_time, window_start, step)
+
+    while current_occurrence_start < range_end:
+        if stop_time and current_occurrence_start >= stop_time:
+            break
+
+        current_occurrence_end = current_occurrence_start + meeting_duration
+        if current_occurrence_end > range_start and current_occurrence_start < range_end:
+            return True
+
+        current_occurrence_start += step
+
+    return False
+
+def overlap_quanta(range_start: datetime, range_end: datetime, start_time: datetime, end_time: datetime) -> int:
+    overlap_start = max(range_start, start_time)
+    overlap_end = min(range_end, end_time)
+    if overlap_end <= overlap_start:
+        return 0
+
+    quantum_seconds = QUANT_MINUTES * 60
+    overlap_seconds = int((overlap_end - overlap_start).total_seconds())
+    return max(1, (overlap_seconds + quantum_seconds - 1) // quantum_seconds)
+
+def recurring_overlap_quanta(range_start: datetime, range_end: datetime, start_time: datetime, end_time: datetime, frequency: str, stop_time: datetime | None) -> int:
+    step = get_recurrence_step(frequency)
+    if not step:
+        return 0
+
+    if stop_time and stop_time <= start_time:
+        return 0
+
+    total_overlap_quanta = 0
+    meeting_duration = end_time - start_time
+    window_start = range_start - meeting_duration
+    current_occurrence_start = first_occurrence_on_or_after(start_time, window_start, step)
+
+    while current_occurrence_start < range_end:
+        if stop_time and current_occurrence_start >= stop_time:
+            break
+
+        current_occurrence_end = current_occurrence_start + meeting_duration
+        total_overlap_quanta += overlap_quanta(
+            range_start,
+            range_end,
+            current_occurrence_start,
+            current_occurrence_end,
+        )
+        current_occurrence_start += step
+
+    return total_overlap_quanta
 
 def find_available_slots(db: Session, request: FindSlotsRequest):
     search_start = request_dt_to_local(request.search_start)
@@ -129,7 +203,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                     busy.append({
                         "resource_id": f"u_{u_id}",
                         "start_quantum": max(0, dt_to_quant(day_start, base_dt)),
-                        "end_quantum": dt_to_quant(day_end, base_dt)
+                        "end_quantum": dt_to_quant(day_end, base_dt),
+                        "weight": W_MAND,
                     })
                 else:
                     work_start = utc_time_to_local_datetime(current_date, s.start_time)
@@ -137,7 +212,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                         busy.append({
                             "resource_id": f"u_{u_id}",
                             "start_quantum": max(0, dt_to_quant(day_start, base_dt)),
-                            "end_quantum": dt_to_quant(work_start, base_dt)
+                            "end_quantum": dt_to_quant(work_start, base_dt),
+                            "weight": W_MAND,
                         })
                         
                     work_end = utc_time_to_local_datetime(current_date, s.end_time)
@@ -145,7 +221,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                         busy.append({
                             "resource_id": f"u_{u_id}",
                             "start_quantum": max(0, dt_to_quant(work_end, base_dt)),
-                            "end_quantum": dt_to_quant(day_end, base_dt)
+                            "end_quantum": dt_to_quant(day_end, base_dt),
+                            "weight": W_MAND,
                         })
             
             current_date += timedelta(days=1)
@@ -166,7 +243,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             busy.append({
                                 "resource_id": f"u_{mp.user_id}",
                                 "start_quantum": max(0, dt_to_quant(m_start_local, base_dt)),
-                                "end_quantum": dt_to_quant(m_end_local, base_dt)
+                                "end_quantum": dt_to_quant(m_end_local, base_dt),
+                                "weight": mp.weight,
                             })
                     else:
                         stop_time_local = utc_db_dt_to_local(m.period_stop_time) if m.period_stop_time else None
@@ -180,6 +258,7 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             base_dt,
                             "u",
                             mp.user_id,
+                            mp.weight,
                             stop_time_local
                         )
 
@@ -199,7 +278,8 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             busy.append({
                                 "resource_id": f"r_{mr.resource_id}",
                                 "start_quantum": max(0, dt_to_quant(m_start_local, base_dt)),
-                                "end_quantum": dt_to_quant(m_end_local, base_dt)
+                                "end_quantum": dt_to_quant(m_end_local, base_dt),
+                                "weight": mr.weight,
                             })
                     else:
                         stop_time_local = utc_db_dt_to_local(m.period_stop_time) if m.period_stop_time else None
@@ -213,6 +293,7 @@ def find_available_slots(db: Session, request: FindSlotsRequest):
                             base_dt,
                             "r",
                             mr.resource_id,
+                            mr.weight,
                             stop_time_local
                         )
         
@@ -354,42 +435,74 @@ def validate_meeting_slot(db: Session, request: ValidateSlotRequest) -> Validate
         current_date += timedelta(days=1)
 
     # 2. Зустрічі Користувачів
+    non_recurring_filter = or_(Meeting.frequency == None, Meeting.frequency == "once")
+    recurring_filter = Meeting.frequency.in_(["daily", "weekly"])
+    overlap_filter = and_(Meeting.start_time < end_dt_utc, Meeting.end_time > start_dt_utc)
+
     user_meetings = db.query(Meeting).join(MeetingParticipant).filter(
         MeetingParticipant.user_id.in_(user_ids),
-        Meeting.start_time < end_dt_utc,
-        Meeting.end_time > start_dt_utc
+        or_(
+            and_(non_recurring_filter, overlap_filter),
+            and_(recurring_filter, Meeting.start_time < end_dt_utc)
+        )
     ).all()
 
     if request.meeting_id:
         user_meetings = [m for m in user_meetings if m.id != request.meeting_id]
 
     for m in user_meetings:
+        start_local = utc_db_dt_to_local(m.start_time)
+        end_local = utc_db_dt_to_local(m.end_time)
+        overlap_count = overlap_quanta(start_dt, end_dt, start_local, end_local)
+
+        if m.frequency and m.frequency != "once":
+            stop_local = utc_db_dt_to_local(m.period_stop_time) if m.period_stop_time else None
+            overlap_count = recurring_overlap_quanta(start_dt, end_dt, start_local, end_local, m.frequency, stop_local)
+            if overlap_count == 0:
+                continue
+        elif overlap_count == 0:
+            continue
+
         for mp in m.participants:
             if mp.user_id in user_ids and mp.status != "Rejected":
-                name = user_names.get(mp.id, f"ID {mp.user_id}")
+                name = user_names.get(mp.user_id, f"ID {mp.user_id}")
                 conflicts.append(f"{name} вже має зустріч: '{m.title}'")
-                weight = next((u.weight for u in request.users if u.id == mp.user_id), 10)
-                score += weight
+                weight = mp.weight
+                score += weight * overlap_count
                 if weight >= W_MAND:
                     has_critical_conflict = True
 
     # 3. Ресурси (Кімнати)
     res_meetings = db.query(Meeting).join(MeetingResource).filter(
         MeetingResource.resource_id.in_(resource_ids),
-        Meeting.start_time < end_dt_utc,
-        Meeting.end_time > start_dt_utc
+        or_(
+            and_(non_recurring_filter, overlap_filter),
+            and_(recurring_filter, Meeting.start_time < end_dt_utc)
+        )
     ).all()
 
     if request.meeting_id:
         res_meetings = [m for m in res_meetings if m.id != request.meeting_id]
 
     for m in res_meetings:
+        start_local = utc_db_dt_to_local(m.start_time)
+        end_local = utc_db_dt_to_local(m.end_time)
+        overlap_count = overlap_quanta(start_dt, end_dt, start_local, end_local)
+
+        if m.frequency and m.frequency != "once":
+            stop_local = utc_db_dt_to_local(m.period_stop_time) if m.period_stop_time else None
+            overlap_count = recurring_overlap_quanta(start_dt, end_dt, start_local, end_local, m.frequency, stop_local)
+            if overlap_count == 0:
+                continue
+        elif overlap_count == 0:
+            continue
+
         for mr in m.resources:
             if mr.resource_id in resource_ids:
                 name = res_names.get(mr.resource_id, f"Кімната {mr.resource_id}")
                 conflicts.append(f"Кімната '{name}' зайнята: '{m.title}'")
-                weight = next((r.weight for r in request.resources if r.id == mr.resource_id), 10)
-                score += weight
+                weight = mr.weight
+                score += weight * overlap_count
                 if weight >= W_MAND:
                     has_critical_conflict = True
 

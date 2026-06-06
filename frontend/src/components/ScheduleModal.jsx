@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
 
+const MANDATORY_WEIGHT = 1_000_000;
+const OPTIONAL_USER_WEIGHT = 100;
+const OPTIONAL_RESOURCE_WEIGHT = 100;
+
 const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -175,7 +179,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
       })
       .map(([id, type]) => ({
         id: Number(id),
-        weight: type === 'required' ? 1000000 : 10
+        weight: type === 'required' ? MANDATORY_WEIGHT : OPTIONAL_USER_WEIGHT
       }));
   };
 
@@ -258,7 +262,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
     // Спільні масиви користувачів та ресурсів
     const mappedUsers = buildParticipantsPayload();
     const mappedResources = Object.entries(resources).map(([id, type]) => ({ 
-      id: Number(id), weight: type === 'required' ? 1000000 : 10 
+      id: Number(id), weight: type === 'required' ? MANDATORY_WEIGHT : OPTIONAL_RESOURCE_WEIGHT
     }));
 
     try {
@@ -267,6 +271,7 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
         const validatePayload = {
           start_time: finalStart,
           end_time: finalEnd,
+          soft_validation: true,
           users: mappedUsers,
           resources: mappedResources
         };
@@ -294,12 +299,17 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
   };
 
   const bookMeeting = async (slot) => {
+    if (validatedSlot && validationResult && !validationResult.is_valid) {
+      setError('Цей слот має критичний конфлікт і недоступний для бронювання.');
+      return;
+    }
+
     try {
       const payload = {
         title, description, project_id: selectedProject, frequency,
         start_time: slot.start_time, end_time: slot.end_time,
         participants: buildParticipantsPayload(),
-        resources: Object.entries(resources).map(([id, type]) => ({ id: Number(id), weight: type === 'required' ? 1000000 : 10 }))
+        resources: Object.entries(resources).map(([id, type]) => ({ id: Number(id), weight: type === 'required' ? MANDATORY_WEIGHT : OPTIONAL_RESOURCE_WEIGHT }))
       };
       await api.post('/meetings/', payload);
       onSuccess(); onClose();
@@ -455,17 +465,31 @@ const ScheduleModal = ({ isOpen, onClose, onSuccess, currentUserId }) => {
           <div className="result-box">
             <h4>Результат валідації:</h4>
             {validatedSlot && <p>Час: {formatSlotRange(validatedSlot)}</p>}
-            {validationResult.is_valid ? 
-              <p className="text-success">✅ Час вільний! Штраф: {validationResult.score}</p> :
+            {validationResult.is_valid ? (
+              Number(validationResult.score) > 0 ? (
+                <div className="text-warning">
+                  <p>⚠️ Час доступний зі штрафом: {validationResult.score}</p>
+                  {validationResult.conflicts.length > 0 && (
+                    <ul>
+                      {validationResult.conflicts.map((c, i) => <li key={i}>⚠️ {c}</li>)}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <p className="text-success">✅ Час вільний! Штраф: {validationResult.score}</p>
+              )
+            ) : (
               <div className="text-danger">
                 <p>❌ Конфлікти (Штраф: {validationResult.score}):</p>
-                <ul>{validationResult.conflicts.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                <ul>{validationResult.conflicts.map((c, i) => <li key={i}>❌ {c}</li>)}</ul>
               </div>
-            }
-            <button onClick={() => validatedSlot && bookMeeting(validatedSlot)} 
-                    className={validationResult.is_valid ? "btn btn-success btn-block" : "btn btn-warning btn-block"}>
-              {validationResult.is_valid ? "Забронювати" : "Забронювати попри конфлікти"}
-            </button>
+            )}
+            {validationResult.is_valid && (
+              <button onClick={() => validatedSlot && bookMeeting(validatedSlot)} 
+                      className="btn btn-success btn-block">
+                Забронювати
+              </button>
+            )}
           </div>
         )}
 

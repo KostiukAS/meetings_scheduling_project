@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
 
+const MANDATORY_WEIGHT = 1_000_000;
+const OPTIONAL_USER_WEIGHT = 100;
+const OPTIONAL_RESOURCE_WEIGHT = 100;
+
 const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSuccess }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({ title: '', description: '', frequency: '' });
@@ -161,7 +165,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
       if (!Number.isFinite(id)) return;
       unique.set(id, {
         id,
-        weight: Number(p.weight ?? 1000000)
+        weight: Number(p.weight ?? MANDATORY_WEIGHT)
       });
     });
     return Array.from(unique.values());
@@ -174,7 +178,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
       if (!Number.isFinite(id)) return;
       unique.set(id, {
         id,
-        weight: Number(r.weight ?? 1000000)
+        weight: Number(r.weight ?? MANDATORY_WEIGHT)
       });
     });
     return Array.from(unique.values());
@@ -248,7 +252,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
     setError('');
 
     try {
-      const weight = newParticipantType === 'required' ? 1000000 : 10;
+      const weight = newParticipantType === 'required' ? MANDATORY_WEIGHT : OPTIONAL_USER_WEIGHT;
       const nextParticipants = [
         ...(localMeeting?.participants || []),
         { id: Number(newParticipantId), weight }
@@ -344,7 +348,7 @@ const MeetingDetailsModal = ({ isOpen, onClose, meeting, currentUserId, onSucces
     setError('');
 
     try {
-      const weight = newResourceType === 'required' ? 1000000 : 10;
+      const weight = newResourceType === 'required' ? MANDATORY_WEIGHT : OPTIONAL_RESOURCE_WEIGHT;
       const nextResources = [
         ...(localMeeting?.resources || []),
         { id: Number(newResourceId), weight }

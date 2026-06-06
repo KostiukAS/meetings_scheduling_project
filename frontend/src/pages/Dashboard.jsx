@@ -65,16 +65,26 @@ const Dashboard = () => {
         return `${year}-${month}-${day}`;
       };
 
+      const getCurrentUserStatus = (meeting) => {
+        const currentParticipant = (meeting.participants || []).find(
+          (participant) => Number(participant.id) === Number(userId)
+        );
+        return currentParticipant?.status || null;
+      };
+
       response.data.forEach(meeting => {
         const startLocal = meeting.start_time;
         const endLocal = meeting.end_time;
         const endRecur = meeting.period_stop_time
           ? formatLocalDate(meeting.period_stop_time)
           : undefined;
+        const currentUserStatus = getCurrentUserStatus(meeting);
+        const classNames = currentUserStatus === 'Rejected' ? ['calendar-event-rejected'] : [];
         
         const baseEvent = {
           id: meeting.id,
           title: meeting.title,
+          classNames,
           backgroundColor: meeting.organizer_id === userId ? '#28a745' : '#3788d8',
           extendedProps: {
             organizer_id: meeting.organizer_id,
@@ -83,7 +93,8 @@ const Dashboard = () => {
             participants: meeting.participants,
             resources: meeting.resources,
             project_id: meeting.project_id,
-            period_stop_time: meeting.period_stop_time
+            period_stop_time: meeting.period_stop_time,
+            current_user_status: currentUserStatus
           }
         };
 

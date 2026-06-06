@@ -604,6 +604,10 @@ body {
 	color: #15803d;
 }
 
+.text-warning {
+	color: #b45309;
+}
+
 .text-danger {
 	color: #b42318;
 }
@@ -636,6 +640,10 @@ body {
 .calendar-card .fc .fc-daygrid-day.fc-day-today,
 .calendar-card .fc .fc-timegrid-col.fc-day-today {
 	background: rgba(15, 111, 108, 0.08);
+}
+
+.calendar-card .fc .calendar-event-rejected {
+	opacity: 0.45;
 }
 
 .admin-page {

@@ -2,25 +2,33 @@ from typing import List, Dict, Any
 
 # Константи ваги штрафів
 W_MAND = 1_000_000
-W_OPT = 10
+W_OPT = 100
 
-def build_availability_matrix(r_m: List[Dict[str, Any]], busy: List[Dict[str, int]], t_start: int, t_end: int) -> Dict[int, Dict[int, int]]:
+def build_availability_matrix(r_m: List[Dict[str, Any]], busy: List[Dict[str, int]], t_start: int, t_end: int) -> Dict[int, Dict[int, Dict[str, int]]]:
     """
     1. Побудова матриці доступності квантів B[r, t].
-    Повертає словник, де ключ - ID ресурсу, а значення - словник квантів (0 - вільно, 1 - зайнято).
+    Повертає словник, де ключ - ID ресурсу, а значення - словник квантів
+    з накопиченим штрафом та ознакою критичної зайнятості.
     """
-    # Ініціалізуємо матрицю нулями для всіх ресурсів у вказаному діапазоні
-    b_matrix = {r["id"]: {t: 0 for t in range(t_start, t_end + 1)} for r in r_m}
+    b_matrix = {
+        r["id"]: {
+            t: {"penalty": 0, "critical": 0}
+            for t in range(t_start, t_end + 1)
+        }
+        for r in r_m
+    }
     
-    # Заповнюємо матрицю зайнятими квантами на основі існуючих зустрічей
     for event in busy:
         r_id = event["resource_id"]
         if r_id in b_matrix:
-            # Визначаємо межі перетину існуючої зустрічі з нашим діапазоном пошуку
             s = max(t_start, event["start_quantum"])
             e = min(t_end, event["end_quantum"])
+            weight = event.get("weight", W_MAND)
             for t in range(s, e):
-                b_matrix[r_id][t] = 1
+                if weight >= W_MAND:
+                    b_matrix[r_id][t]["critical"] = 1
+                else:
+                    b_matrix[r_id][t]["penalty"] += weight
                 
     return b_matrix
 
@@ -80,22 +88,17 @@ def find_best_meeting_slots(d: int, t_start: int, t_end: int, r_m: List[Dict[str
         
         # Перевірка кожного ресурсу
         for r in r_m:
-            resource_busy_time = 0
             r_id = r["id"]
-            r_weight = r["weight"]
             
-            # Внутрішній цикл: перевірка кожного кванта вікна
             for quantum in range(t, t + d):
-                resource_busy_time += b_matrix[r_id][quantum]
-                
-            if resource_busy_time > 0:
-                # Якщо вага ресурсу дорівнює або більша за обов'язкову
-                if r_weight >= W_MAND:
+                quantum_state = b_matrix[r_id][quantum]
+                if quantum_state["critical"]:
                     is_critical_conflict = True
-                    break  # Вікно не валідне, перериваємо перевірку ресурсів
-                else:
-                    # Нарахування штрафу за опціональний ресурс
-                    penalty_score += resource_busy_time * r_weight
+                    break
+                penalty_score += quantum_state["penalty"]
+
+            if is_critical_conflict:
+                break
                     
         # 3. Збереження результату, якщо немає критичних конфліктів
         if not is_critical_conflict:
