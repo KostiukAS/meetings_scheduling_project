@@ -169,8 +169,8 @@ def add_participant_to_meeting(
 
     _ensure_slot_is_bookable(
         db,
-        start_time=meeting.start_time,
-        end_time=meeting.end_time,
+        start_time=meet_service.utc_db_dt_to_local(meeting.start_time),
+        end_time=meet_service.utc_db_dt_to_local(meeting.end_time),
         users=participant_items,
         resources=resource_items,
         meeting_id=meeting.id,
@@ -255,8 +255,8 @@ def update_meeting(
     resource_items = [ParticipantItem(id=mr.resource_id, weight=mr.weight) for mr in meeting.resources]
     _ensure_slot_is_bookable(
         db,
-        start_time=next_start_time,
-        end_time=next_end_time,
+        start_time=meet_service.utc_db_dt_to_local(next_start_time),
+        end_time=meet_service.utc_db_dt_to_local(next_end_time),
         users=participant_items,
         resources=resource_items,
         meeting_id=meeting.id,
@@ -380,8 +380,8 @@ def add_resource_to_meeting(
 
     _ensure_slot_is_bookable(
         db,
-        start_time=meeting.start_time,
-        end_time=meeting.end_time,
+        start_time=meet_service.utc_db_dt_to_local(meeting.start_time),
+        end_time=meet_service.utc_db_dt_to_local(meeting.end_time),
         users=participant_items,
         resources=resource_items,
         meeting_id=meeting.id,
